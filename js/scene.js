@@ -8,12 +8,12 @@ import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
-import {SQ, GROUPS, N, CHARS} from './data.js?v=1bf53f6e';
-import {mat, glowMat, setGlow, mesh, rbox, add, box, cyl, sph, cone, torus, capsule, lathe, bake, bakeLocal} from './mats.js?v=1bf53f6e';
-import {makeLandmark} from './landmarks.js?v=1bf53f6e';
-import {buildPark} from './park.js?v=1bf53f6e';
-import {createFx} from './fx.js?v=1bf53f6e';
-import {ToyShader} from './post.js?v=1bf53f6e';
+import {SQ, GROUPS, N, CHARS} from './data.js?v=9c5962e2';
+import {mat, glowMat, setGlow, mesh, rbox, add, box, cyl, sph, cone, torus, capsule, lathe, bake, bakeLocal} from './mats.js?v=9c5962e2';
+import {makeLandmark} from './landmarks.js?v=9c5962e2';
+import {buildPark} from './park.js?v=9c5962e2';
+import {createFx} from './fx.js?v=9c5962e2';
+import {ToyShader} from './post.js?v=9c5962e2';
 
 const INK = '#3b2d45';
 const CREAM = '#fff6e8';
@@ -394,6 +394,19 @@ export async function createScene(container, {onTileClick} = {}){
   }
   function faceOut(g, i){ g.rotation.y = tileFrame(i).rot + Math.PI; }
 
+  // 当前该谁走：他棋子头上飘一个箭头
+  const markerMat = new THREE.MeshStandardMaterial({color: '#ff6f9a', roughness: 0.35, emissive: '#ff6f9a', emissiveIntensity: 0.25});
+  const marker = new THREE.Group();
+  const mCone = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.24, 16), markerMat);
+  mCone.rotation.x = Math.PI;
+  const mRing = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.028, 8, 24), markerMat);
+  mRing.rotation.x = Math.PI / 2;
+  mRing.position.y = 0.26;
+  marker.add(mCone, mRing);
+  marker.visible = false;
+  scene.add(marker);
+  let markerPid = null;
+
   /* ----- 骰子 ----- */
   const dieGeo = rbox(0.42, 0.42, 0.42, 0.08, 4);
   const dieMats = FACE_VALUES.map(dieFace);
@@ -425,14 +438,14 @@ export async function createScene(container, {onTileClick} = {}){
     view.target.set(pos.x * (alongX ? 0.86 : 0.62), 0.1, pos.z * (alongX ? 0.62 : 0.86));
     view.azim = sideAzim(side);
     view.dist = dist;
-    view.polar = portrait() ? 0.74 : 0.8;
+    view.polar = portrait() ? 0.72 : 0.8;
   }
   function overview(){
     view.target.set(0, 0, 0);
     view.dist = portrait() ? 27 : 17.5;
     view.polar = portrait() ? 0.62 : 0.82;
   }
-  const followDist = () => (portrait() ? 10.5 : 11);
+  const followDist = () => (portrait() ? 11.5 : 12);
   {
     const sph0 = new THREE.Spherical(view.dist, view.polar, view.azim);
     camera.position.setFromSpherical(sph0).add(view.target);
@@ -470,7 +483,7 @@ export async function createScene(container, {onTileClick} = {}){
     composer.addPass(bloomPass);
     toyPass = new ShaderPass(ToyShader);
     toyPass.uniforms.resolution.value.set(w, h);
-    toyPass.uniforms.strength.value = quality === 2 ? 2.0 : 1.3;
+    toyPass.uniforms.strength.value = quality === 2 ? 1.3 : 0.9;
     composer.addPass(toyPass);
     composer.addPass(new OutputPass());
   }
@@ -570,6 +583,9 @@ export async function createScene(container, {onTileClick} = {}){
     }
     fx.update(dt);
     for (const [, tk] of tokens) if (!tk.busy) tk.g.userData.fig.position.y = 0.07 + Math.max(0, Math.sin(tt * 2.4 + tk.phase)) * 0.015;
+    const mk = markerPid && tokens.get(markerPid);
+    marker.visible = !!mk;
+    if (mk){ marker.position.copy(mk.g.position); marker.position.y += 1.05 + Math.sin(tt * 3) * 0.06; marker.rotation.y = tt * 1.2; }
     if (hiAt >= 0) ringMat.opacity = 0.55 + Math.sin(tt * 5) * 0.25;
     stepCamera(dt);
     controls.update();
@@ -815,6 +831,8 @@ export async function createScene(container, {onTileClick} = {}){
     },
     tilePos(i){ const f = tileFrame(i); return new THREE.Vector3(f.x, TILE_TOP, f.z); },
     tokenPos(pid){ const tk = tokens.get(pid); return tk ? tk.g.position.clone() : null; },
+    // 谁的回合：箭头跟着他的棋子
+    marker(pid, color){ markerPid = pid; if (color) markerMat.color.set(color), markerMat.emissive.set(color); },
     highlight(i){
       hiAt = i;
       if (i < 0){ ringMat.opacity = 0; return; }

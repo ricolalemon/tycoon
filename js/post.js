@@ -16,7 +16,7 @@ export const ToyShader = {
     varying vec2 vUv;
     void main(){
       float d = abs(vUv.y - focus);
-      float amt = smoothstep(0.1, 0.55, d) * strength;
+      float amt = smoothstep(0.2, 0.62, d) * strength;
       vec3 c = texture2D(tDiffuse, vUv).rgb;
       if (amt > 0.01){
         vec2 px = amt / resolution;

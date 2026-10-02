@@ -1,7 +1,7 @@
 // 每一格上的小地标：用积木搭出来的玩具版名胜。原点在格子顶面，+z 朝棋盘外（镜头那边），
 // 普通格子的地标占 x ±0.35、z ±0.22 这么大一块，高度最多 1.2 左右
 import * as THREE from 'three';
-import {mat, glowMat, WATER, GLASS, add, box, cyl, cone, sph, torus, capsule, roof, lathe, tag, rbox} from './mats.js?v=1bf53f6e';
+import {mat, glowMat, WATER, GLASS, add, box, cyl, cone, sph, torus, capsule, roof, lathe, tag, rbox} from './mats.js?v=9c5962e2';
 
 const C = {
   white: '#fffaf3', cream: '#fff1dc', red: '#ff6b6b', vermil: '#e8573f', gold: '#ffd166', jade: '#6fd6a0', green: '#5fbf85', leaf: '#7ccf8a',

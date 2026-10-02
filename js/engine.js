@@ -1,5 +1,5 @@
 // 规则：只在房主那边跑。不碰画面，所有变化都写进局面 S，再交给 commit 去存、去广播、去画
-import {SQ, N, JAIL, STATIONS, GROUP_SQ, START_CASH, PASS_GO, JAIL_FINE, STATION_RENT, CHARS, BOT_NAMES, CHANCE, FATE, TUNE} from './data.js?v=1bf53f6e';
+import {SQ, N, JAIL, STATIONS, GROUP_SQ, START_CASH, PASS_GO, JAIL_FINE, STATION_RENT, CHARS, BOT_NAMES, CHANCE, FATE, TUNE} from './data.js?v=9c5962e2';
 
 export const ROLL_MS = 1350, STEP_MS = 230, LAND_PAD = 380, TELEPORT_MS = 720;
 const rid = (n = 6) => Array.from({length: n}, () => 'abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random() * 31)]).join('');
@@ -152,7 +152,7 @@ export class Game {
         if (p.cash >= cost){
           this.cash(p, -cost);
           S.own[i] = S.turn;
-          this.fx({k: 'buy', pid: p.pid, i});
+          this.fx({k: 'buy', pid: p.pid, i, v: cost});
           this.log(`${p.name} 买下了${SQ[i].n}，花了 ${cost}`);
         }
         S.offer = -1;
@@ -162,6 +162,7 @@ export class Game {
       case 'skip':
         if (S.step !== 'buy') return;
         this.log(`${p.name} 没买${SQ[S.offer].n}`);
+        this.fx({k: 'skip', pid: p.pid, i: S.offer});
         S.offer = -1;
         this.after(p);
         break;
@@ -171,7 +172,7 @@ export class Game {
         const cost = this.houseCost(p, a.sq);
         this.cash(p, -cost);
         S.lvl[a.sq]++;
-        this.fx({k: 'build', pid: p.pid, i: a.sq});
+        this.fx({k: 'build', pid: p.pid, i: a.sq, lvl: S.lvl[a.sq], v: cost});
         this.log(`${p.name} 在${SQ[a.sq].n}${S.lvl[a.sq] === 5 ? '盖起了大酒店' : `盖了第 ${S.lvl[a.sq]} 栋房子`}`);
         this.commit();
         break;
@@ -180,6 +181,7 @@ export class Game {
         if (!this.canSell(p, a.sq)) return;
         S.lvl[a.sq]--;
         this.cash(p, SQ[a.sq].hc / 2);
+        this.fx({k: 'sell', pid: p.pid, i: a.sq, v: SQ[a.sq].hc / 2});
         this.log(`${p.name} 卖掉${SQ[a.sq].n}的一栋房子，拿回 ${SQ[a.sq].hc / 2}`);
         this.commit();
         break;
@@ -187,6 +189,7 @@ export class Game {
         if (S.step !== 'roll' || !p.jail || p.cash < JAIL_FINE) return;
         this.cash(p, -JAIL_FINE);
         p.jail = 0;
+        this.fx({k: 'free', pid: p.pid, how: 'pay'});
         this.log(`${p.name} 交了 ${JAIL_FINE} 元出狱`);
         this.commit();
         break;
@@ -194,6 +197,7 @@ export class Game {
         if (S.step !== 'roll' || !p.jail || !p.cards) return;
         p.cards--;
         p.jail = 0;
+        this.fx({k: 'free', pid: p.pid, how: 'card'});
         this.log(`${p.name} 用出狱卡出狱了`);
         this.commit();
         break;
@@ -218,17 +222,19 @@ export class Game {
   }
   afterRoll(p, d1, d2){
     const S = this.S, sum = d1 + d2, dbl = d2 > 0 && d1 === d2;
+    this.fx({k: 'roll', pid: p.pid, d: [d1, d2], dbl});
     if (p.jail){
-      if (dbl){ p.jail = 0; this.log(`${p.name} 掷出对子，出狱了`); return this.move(p, sum); }
+      if (dbl){ p.jail = 0; this.fx({k: 'free', pid: p.pid, how: 'dbl'}); this.log(`${p.name} 掷出对子，出狱了`); return this.move(p, sum); }
       p.jail++;
       if (p.jail > 3){
         p.jail = 0;
         this.log(`${p.name} 关满三回合，交 ${JAIL_FINE} 元出狱`);
-        this.pay(p, null, JAIL_FINE);
+        this.pay(p, null, JAIL_FINE, '出狱');
         if (p.out) return this.endTurn();
         return this.move(p, sum);
       }
       this.log(`${p.name} 没掷出对子，还得待在监狱里`);
+      this.fx({k: 'stay', pid: p.pid});
       S.step = 'manage';
       return this.commit();
     }
@@ -261,6 +267,7 @@ export class Game {
     if (forward && path.includes(0)){
       const bonus = PASS_GO + (skill(p) === 'sheep' ? TUNE.sheepBonus : 0);
       this.cash(p, bonus);
+      this.fx({k: 'go', pid: p.pid, v: bonus});
       this.log(`${p.name} 经过起点，领 ${bonus} 元`);
     }
     // 远路（卡片送你去很远的地方）走快一点，整段不超过三秒左右
@@ -279,6 +286,7 @@ export class Game {
     p.jail = 1;
     S.again = false;
     S.dbl = 0;
+    this.fx({k: 'jail', pid: p.pid});
   }
   land(p){
     const S = this.S, i = p.pos, s = SQ[i];
@@ -318,6 +326,7 @@ export class Game {
     const c = list[S.decks[deck][S.deckPos[deck]++ % list.length]];
     S.card = {deck, text: c.text, id: S.rollId * 10 + S.deckPos[deck]};
     S.cardPending = {deck, k: list.indexOf(c)};
+    this.fx({k: 'card', pid: p.pid, deck, text: c.text});
     this.log(`${p.name} 抽到${deck === 'chance' ? '机会' : '命运'}：${c.text}`);
     // 先让大家看一眼卡片再生效
     S.step = 'moving';
@@ -338,11 +347,11 @@ export class Game {
         this.commit();
         { const ep = this.epoch; return this.wait(this.ms(TELEPORT_MS), () => { if (ep === this.epoch) this.after(p); }); }
       case 'card': p.cards++; break;
-      case 'money': if (c.v > 0) this.cash(p, c.v); else this.pay(p, null, -c.v); break;
+      case 'money': if (c.v > 0) this.cash(p, c.v); else this.pay(p, null, -c.v, '卡片'); break;
       case 'each':
         for (const q of S.players){
           if (q === p || q.out) continue;
-          if (c.v < 0) this.pay(p, q, -c.v); else this.pay(q, p, c.v);
+          if (c.v < 0) this.pay(p, q, -c.v, '卡片'); else this.pay(q, p, c.v, '卡片');
           if (p.out) break;
         }
         break;
@@ -350,7 +359,7 @@ export class Game {
         const k = S.turn;
         let fee = 0;
         S.own.forEach((o, i) => { if (o === k) fee += S.lvl[i] === 5 ? 100 : S.lvl[i] * 25; });
-        if (fee) this.pay(p, null, fee); else this.log(`${p.name} 没有房子，不用修`);
+        if (fee) this.pay(p, null, fee, '房屋维修'); else this.log(`${p.name} 没有房子，不用修`);
         break;
       }
     }
@@ -361,6 +370,7 @@ export class Game {
     const S = this.S;
     this.cash(from, -amt);
     if (to) this.cash(to, amt);
+    this.fx({k: 'pay', pid: from.pid, to: to ? to.pid : null, v: amt, why: why || ''});
     if (why) this.log(`${from.name} 付给${to ? to.name : '银行'} ${amt} 元（${why}）`);
     if (from.cash >= 0) return;
     const k = this.idx(from);
@@ -469,6 +479,8 @@ export class Game {
     const p = this.cur;
     if (!p || !(p.ai || p.auto)) return;
     const tok = ++this.botTok, ep = this.epoch;
-    this.wait(this.ms(p.ai ? 750 : 1200), () => { if (tok === this.botTok && ep === this.epoch && this.cur === p) this.botMove(p); });
+    // 电脑掷骰子前想一下，落地以后停久一点，让人看清发生了什么
+    const delay = S.step === 'manage' ? 1800 : S.step === 'buy' ? 1400 : 1000;
+    this.wait(this.ms(p.ai ? delay : delay + 400), () => { if (tok === this.botTok && ep === this.epoch && this.cur === p) this.botMove(p); });
   }
 }

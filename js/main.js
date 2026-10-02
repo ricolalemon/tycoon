@@ -1,9 +1,9 @@
 // 把规则、3D 画面、联机、声音和界面串起来
-import {createScene} from './scene.js?v=1bf53f6e';
-import {Game, STEP_MS} from './engine.js?v=1bf53f6e';
-import {createNet} from './net.js?v=1bf53f6e';
-import {createAudio} from './audio.js?v=1bf53f6e';
-import {SQ, GROUPS, CHARS, JAIL_FINE, STATION_RENT, PASS_GO, TUNE} from './data.js?v=1bf53f6e';
+import {createScene} from './scene.js?v=9c5962e2';
+import {Game, STEP_MS, ROLL_MS} from './engine.js?v=9c5962e2';
+import {createNet} from './net.js?v=9c5962e2';
+import {createAudio} from './audio.js?v=9c5962e2';
+import {SQ, GROUPS, CHARS, JAIL_FINE, STATION_RENT, PASS_GO, TUNE} from './data.js?v=9c5962e2';
 
 /* ---------- 基本工具 ---------- */
 const $ = id => document.getElementById(id);
@@ -31,6 +31,61 @@ function toast(text, ms = 2200){
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+/* ---------- 事件播报：屏幕上方一条条横幅，排队一条条放 ---------- */
+const eventQ = [];
+let eventBusy = false, eventTimer = 0;
+function announce(e){   // {ico, pid, text, amount, tone, pic, ms}
+  eventQ.push(e);
+  if (eventQ.length > 4) eventQ.shift();
+  if (!eventBusy) nextEvent();
+}
+function nextEvent(){
+  const box = $('event');
+  const e = eventQ.shift();
+  clearTimeout(eventTimer);
+  if (!e){ eventBusy = false; box.classList.remove('show'); return; }
+  eventBusy = true;
+  box.replaceChildren();
+  if (e.ico) box.appendChild(el('span', 'ico', e.ico));
+  const p = e.pid && S && S.players ? S.players.find(q => q.pid === e.pid) : null;
+  if (p) box.appendChild(avatar(p.ch, 'av sm'));
+  box.appendChild(el('span', 'tx', e.text));
+  if (e.amount != null) box.appendChild(el('span', 'amt ' + (e.tone || ''), (e.tone === 'up' ? '+' : e.tone === 'down' ? '−' : '') + '¥' + Math.abs(Math.round(e.amount))));
+  if (e.pic){ const im = new Image(); im.className = 'pic'; im.src = e.pic; box.appendChild(im); }
+  box.classList.remove('show');
+  void box.offsetWidth;
+  box.classList.add('show');
+  eventTimer = setTimeout(nextEvent, e.ms || 2300);
+}
+function clearEvents(){ eventQ.length = 0; clearTimeout(eventTimer); eventBusy = false; $('event').classList.remove('show'); $('dice').classList.remove('show'); }
+let diceTimer = 0;
+function showDice(d, dbl){
+  const b = $('dice');
+  b.textContent = `🎲 ${d[1] ? `${d[0]} + ${d[1]} = ${d[0] + d[1]}` : d[0]}${dbl ? ' · 对子！' : ''}`;
+  b.classList.add('show');
+  clearTimeout(diceTimer);
+  diceTimer = setTimeout(() => b.classList.remove('show'), 4500);
+}
+// 玩家条上冒出来的 +200 / −90
+const recentDelta = new Map();
+function bumpDelta(pid, v){
+  const now = Date.now(), d = recentDelta.get(pid);
+  recentDelta.set(pid, {v: (d && d.until > now ? d.v : 0) + v, until: now + 2600});
+  paintDeltas();
+  setTimeout(paintDeltas, 2700);
+}
+function paintDeltas(){
+  const now = Date.now();
+  for (const chip of document.querySelectorAll('#players .pc')){
+    const d = recentDelta.get(chip.dataset.pid);
+    let span = chip.querySelector('.delta');
+    if (d && d.until > now && Math.round(d.v) !== 0){
+      if (!span){ span = el('span', 'delta'); chip.appendChild(span); }
+      span.className = 'delta ' + (d.v > 0 ? 'up' : 'down');
+      span.textContent = (d.v > 0 ? '+' : '−') + Math.abs(Math.round(d.v));
+    } else if (span) span.remove();
+  }
 }
 const audio = createAudio(store);
 const sfx = (n, ...a) => audio.sfx(n, ...a);
@@ -183,10 +238,10 @@ function render(){
     if (document.activeElement !== $('nameIn')) $('nameIn').value = myName;
     const saved = store.get('game:solo', null);
     $('btnSolo').textContent = saved && saved.phase === 'play' ? '接着玩上一局（和电脑）' : '和电脑玩';
-    idle(true); syncBoard(null); renderSound(); return;
+    idle(true); syncBoard(null); renderSound(); sc.marker(null); clearEvents(); return;
   }
   if (!S){ screen('waiting'); return; }
-  if (S.phase === 'lobby'){ screen('lobby'); renderLobby(); idle(true); syncBoard(null); closeModal('over'); return; }
+  if (S.phase === 'lobby'){ screen('lobby'); renderLobby(); idle(true); syncBoard(null); closeModal('over'); sc.marker(null); clearEvents(); return; }
   screen('game');
   idle(false);
   sc.setDay(dayFor(), S.gid === viewGid);
@@ -199,6 +254,8 @@ function render(){
     shownCard = S.card ? S.card.id : 0;
     lastTurnPid = '';
     animating = 0;
+    clearEvents();
+    recentDelta.clear();
     sc.syncTokens(S.players);
     if (cur()) sc.focusTile(cur().pos);
     cashShown.clear();
@@ -246,15 +303,34 @@ function playEffects(){
   for (const f of S.fx){
     if (f.id <= shownFx) continue;
     shownFx = f.id;
+    const who = S.players.find(q => q.pid === f.pid), name = who ? (who.pid === ME ? '你' : who.name) : '';
+    const tone = f.pid === ME ? 'down' : '';
     if (f.k === 'cash'){
       floatMoney(f.pid, f.v);
+      bumpDelta(f.pid, f.v);
       const now = Date.now();
       if (now - lastCoinAt > 160){ lastCoinAt = now; sfx(f.v > 0 ? 'coin' : 'pay'); }
       if (f.v > 0) setTimeout(() => { const p = sc.tokenPos(f.pid); if (p) sc.burst('coins', p); }, animating ? 450 : 60);
     }
-    if (f.k === 'buy'){ sfx('buy'); sc.burst('confetti', f.i); }
-    if (f.k === 'build'){ if (S.lvl[f.i] === 5){ sfx('hotel'); sc.fireworks(f.i, 3); } else sfx('build'); }
-    if (f.k === 'bust'){ const p = S.players.find(q => q.pid === f.pid); if (p) toast(`${p.name} 破产出局了`); sfx('bust'); }
+    if (f.k === 'roll') setTimeout(() => showDice(f.d, f.dbl), FAST.on ? 0 : ROLL_MS - 150);
+    if (f.k === 'go') announce({ico: '🚩', pid: f.pid, text: `${name} 经过起点`, amount: f.v, tone: 'up', ms: 1800});
+    if (f.k === 'pay'){
+      const to = f.to ? S.players.find(q => q.pid === f.to) : null;
+      const toName = to ? (to.pid === ME ? '你' : to.name) : '银行';
+      announce({ico: '💸', pid: f.pid, text: `${name} 付给${toName}${f.why ? '　' + f.why : ''}`, amount: f.v, tone: f.to === ME ? 'up' : f.pid === ME ? 'down' : '', ms: 2600});
+    }
+    if (f.k === 'buy'){ sfx('buy'); sc.burst('confetti', f.i); announce({ico: '🏙️', pid: f.pid, text: `${name} 买下了${SQ[f.i].n}`, amount: f.v, tone, pic: sc.snapshot(f.i), ms: 2600}); }
+    if (f.k === 'skip') announce({ico: '🤔', pid: f.pid, text: `${name} 没买${SQ[f.i].n}`, ms: 1500});
+    if (f.k === 'build'){
+      if (f.lvl === 5){ sfx('hotel'); sc.fireworks(f.i, 3); } else sfx('build');
+      announce({ico: f.lvl === 5 ? '🏨' : '🏠', pid: f.pid, text: `${name} 在${SQ[f.i].n}${f.lvl === 5 ? '盖起了大酒店' : `盖了第 ${f.lvl} 栋房子`}`, amount: f.v, tone, pic: sc.snapshot(f.i), ms: 2400});
+    }
+    if (f.k === 'sell') announce({ico: '🔨', pid: f.pid, text: `${name} 卖了${SQ[f.i].n}的一栋房子`, amount: f.v, tone: f.pid === ME ? 'up' : '', ms: 1800});
+    if (f.k === 'jail') announce({ico: '🚓', pid: f.pid, text: `${name} 进监狱了`, ms: 2000});
+    if (f.k === 'free') announce({ico: '🔓', pid: f.pid, text: `${name} ${f.how === 'pay' ? '交钱出狱了' : f.how === 'card' ? '用出狱卡出狱了' : '掷出对子，出狱了'}`, ms: 1800});
+    if (f.k === 'stay') announce({ico: '🔒', pid: f.pid, text: `${name} 没掷出对子，继续坐牢`, ms: 1800});
+    if (f.k === 'card') announce({ico: f.deck === 'chance' ? '❓' : '🔮', pid: f.pid, text: `${name} 抽到${f.deck === 'chance' ? '机会' : '命运'}：${f.text}`, ms: 2800});
+    if (f.k === 'bust'){ announce({ico: '💥', pid: f.pid, text: `${name} 破产出局了`, ms: 3000}); sfx('bust'); }
   }
   if (S.card && S.card.id !== shownCard){
     shownCard = S.card.id;
@@ -389,6 +465,7 @@ function renderHud(){
     const c = charOf(q.ch);
     const d = el('div', 'pc' + (k === S.turn && S.phase === 'play' ? ' cur' : '') + (q.out ? ' out' : ''));
     d.style.setProperty('--c', c.color);
+    d.dataset.pid = q.pid;
     const info = el('span', 'info');
     const cashEl = el('span', 'cash');
     const shown = cashShown.get(q.pid);
@@ -402,11 +479,14 @@ function renderHud(){
     box.appendChild(d);
   });
   if (!cashTween) cashTween = requestAnimationFrame(tickCash);
+  paintDeltas();
   $('turnWho').textContent = S.phase === 'over' ? '游戏结束' : mine ? `轮到你了 · ${charOf(p.ch).name}` : `轮到 ${p.name}`;
   const rd = S.maxRounds ? Math.min(S.round, S.maxRounds) : S.round;
   const t = sc.day, clock = t < 0.08 ? '🌅' : t < 0.4 ? '☀️' : t < 0.56 ? '🌇' : t < 0.9 ? '🌙' : '🌅';
   $('roundLbl').textContent = `${clock} ${S.maxRounds ? `${rd}/${S.maxRounds} 圈` : `第 ${rd} 圈`}`;
+  sc.marker(S.phase === 'play' && p ? p.pid : null, p ? charOf(p.ch).color : null);
   if (mine && lastTurnPid !== ME && S.phase === 'play' && S.players.some(q => q.pid !== ME && !q.out)){ toast('轮到你了'); sfx('turn'); }
+  else if (p && !mine && p.pid !== lastTurnPid && S.phase === 'play' && lastTurnPid) announce({ico: '▶️', pid: p.pid, text: `轮到 ${p.name}`, ms: 1400});
   if (p && p.pid !== lastTurnPid && S.phase === 'play' && S.step === 'roll') sc.focusTile(p.pos);
   lastTurnPid = p ? p.pid : '';
   const hostGone = room && !isHost && net.ok && !net.online.has(S.hostId);
@@ -766,6 +846,24 @@ $('btnCopy').addEventListener('click', () => {
   try { navigator.clipboard.writeText(text).then(() => toast('链接复制好了，发给朋友吧'), fallback); } catch (e){ fallback(); }
 });
 $('btnMine').addEventListener('click', () => openMine());
+$('btnLog').addEventListener('click', () => {
+  if (!S || !S.log) return;
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.style.setProperty('--g', 'var(--sky)');
+  head.appendChild(el('div', 'tx')).appendChild(el('h3', '', '刚才发生了什么'));
+  const body = el('div', 'card-body');
+  const ul = el('ul', 'log');
+  for (const t of S.log) ul.appendChild(el('li', '', t));
+  if (!S.log.length) ul.appendChild(el('li', '', '还什么都没发生。'));
+  body.appendChild(ul);
+  const close = el('button', 'btn ghost small', '关闭');
+  close.type = 'button';
+  close.addEventListener('click', () => closeModal());
+  body.appendChild(close);
+  card.append(head, body);
+  openModal('log', card);
+});
 $('btnMenu').addEventListener('click', openMenu);
 for (const id of ['btnSound', 'btnSoundHome']) $(id).addEventListener('click', () => { audio.setOn(!audio.on); renderSound(); if (audio.on) sfx('pop'); });
 let overview = false;
