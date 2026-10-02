@@ -44,12 +44,12 @@ export const SQ = [
   {t: 'station', n: '港口', p: 200, lm: 'ship', blurb: '车站越多，过路费越贵：1 个 25，2 个 50，3 个 100，4 个 200。'},
   city(5, '天津', 260, [22, 110, 330, 800, 975, 1150], 150, 'tianjineye', '天津之眼', '海河上的大摩天轮，架在桥上慢慢转。'),
   city(5, '重庆', 260, [22, 110, 330, 800, 975, 1150], 150, 'hongya', '洪崖洞', '山城的夜晚，洪崖洞层层叠叠亮起灯。'),
-  {t: 'bank', n: '银行', lm: 'bank', blurb: '下一版开门：可以存钱、借钱。'},
+  {t: 'bank', n: '银行', lm: 'bank', blurb: '走到这里可以存钱、取钱、借钱、还钱。存款每经过一次起点领 10% 利息，贷款每经过一次起点扣 10% 利息。'},
   city(5, '成都', 280, [24, 120, 360, 850, 1025, 1200], 150, 'panda', '熊猫基地', '慢悠悠的天府之国，熊猫抱着竹子啃个不停。'),
   {t: 'gojail', n: '进监狱', lm: 'police', blurb: '走到这里直接进监狱，不经过起点。'},
   city(6, '杭州', 300, [26, 130, 390, 900, 1100, 1275], 200, 'leifeng', '雷峰塔', '西湖边的雷峰塔，断桥上等一个人。'),
   city(6, '广州', 300, [26, 130, 390, 900, 1100, 1275], 200, 'canton', '广州塔', '小蛮腰亮起来，早茶吃起来。'),
-  {t: 'stock', n: '证券所', lm: 'chart', blurb: '下一版开市：可以买卖股票。'},
+  {t: 'stock', n: '证券所', lm: 'chart', blurb: '轮到你时随时能炒股（手续费 5%）；走到这里的这一回合免手续费，还能看到下一圈的涨跌内幕。'},
   city(6, '深圳', 320, [28, 150, 450, 1000, 1200, 1400], 200, 'shenzhen', '摩天楼', '一夜之间长高的城市，玻璃楼里亮到天明。'),
   {t: 'station', n: '汽车站', p: 200, lm: 'bus', blurb: '车站越多，过路费越贵：1 个 25，2 个 50，3 个 100，4 个 200。'},
   {t: 'chance', n: '机会', lm: 'qmark', blurb: '抽一张机会卡：可能领钱，也可能被送去别的城市。'},
@@ -89,6 +89,14 @@ export const ITEMS = {
 export const ITEM_IDS = Object.keys(ITEMS);
 export const HAND = 3;
 export const SHOP = 12;
+// 股票：base 开盘价附近，vol 每圈波动幅度，div 每圈分红比例
+export const STOCKS = [
+  {id: 'milk', name: '咩咩牛奶', ico: '🥛', base: 60, vol: 0.12, div: 0.03},
+  {id: 'bamboo', name: '熊猫竹业', ico: '🎋', base: 40, vol: 0.08, div: 0.05},
+  {id: 'express', name: '虎妞快递', ico: '📦', base: 80, vol: 0.18, div: 0},
+  {id: 'cake', name: '跳跳蛋糕', ico: '🍰', base: 30, vol: 0.26, div: 0}
+];
+export const BANK = 28, STOCK = 33, LOAN_MAX = 500, LOAN_RATE = 0.1, SAVE_RATE = 0.1, FEE = 0.05;
 export const BOT_NAMES = ['电脑·阿财', '电脑·小富', '电脑·大款', '电脑·旺旺', '电脑·多多'];
 
 export const CHANCE = [

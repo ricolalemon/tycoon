@@ -1,9 +1,9 @@
 // 把规则、3D 画面、联机、声音和界面串起来
-import {createScene} from './scene.js?v=caed7d2d';
-import {Game, STEP_MS, ROLL_MS} from './engine.js?v=caed7d2d';
-import {createNet} from './net.js?v=caed7d2d';
-import {createAudio} from './audio.js?v=caed7d2d';
-import {SQ, GROUPS, CHARS, JAIL_FINE, STATION_RENT, PASS_GO, TUNE, ITEMS, HAND, SHOP} from './data.js?v=caed7d2d';
+import {createScene} from './scene.js?v=4dac8e9d';
+import {Game, STEP_MS, ROLL_MS} from './engine.js?v=4dac8e9d';
+import {createNet} from './net.js?v=4dac8e9d';
+import {createAudio} from './audio.js?v=4dac8e9d';
+import {SQ, GROUPS, CHARS, JAIL_FINE, STATION_RENT, PASS_GO, TUNE, ITEMS, HAND, SHOP, STOCKS, STOCK, LOAN_MAX, FEE} from './data.js?v=4dac8e9d';
 
 /* ---------- 基本工具 ---------- */
 const $ = id => document.getElementById(id);
@@ -269,6 +269,8 @@ function render(){
   if (modalKind === 'city' && cityOpen >= 0) openCity(cityOpen, true);
   if (modalKind === 'mine') openMine(true);
   if (modalKind === 'shop'){ const my = me(); if (my && S.step === 'shop' && cur() === my && !my.auto) openShop(true); else closeModal(); }
+  if (modalKind === 'bank'){ const my = me(); if (my && S.step === 'bank' && cur() === my && !my.auto) openBank(true); else closeModal(); }
+  if (modalKind === 'stock') openStock(true);
   if (modalKind === 'item' || modalKind === 'pick'){ const my = me(); if (!my || cur() !== my || !['roll', 'manage'].includes(S.step)) closeModal(); }
   renderHand();
 }
@@ -345,6 +347,18 @@ function playEffects(){
     if (f.k === 'double') announce({ico: '💰', pid: f.pid, text: `${name} 的过路费这一圈翻倍`, ms: 2400});
     if (f.k === 'sleep') announce({ico: '😴', pid: f.pid, text: `${name} 给${vName}放了瞌睡虫`, ms: 2400});
     if (f.k === 'sleepy'){ sfx('snore'); announce({ico: '💤', pid: f.pid, text: `${name} 睡着了，这一回合跳过`, ms: 2400}); }
+    if (f.k === 'market'){
+      const big = f.moves.filter(m => Math.abs(m.pct) >= 5).map(m => `${STOCKS.find(s => s.id === m.sid).ico}${m.pct > 0 ? '▲' : '▼'}${Math.abs(m.pct)}%`).join(' ');
+      if (big) announce({ico: '📈', text: `新一圈行情：${big}`, ms: 2800});
+    }
+    if (f.k === 'dividend') announce({ico: '💵', pid: f.pid, text: `${name} 收到股票分红`, amount: f.v, tone: f.pid === ME ? 'up' : '', ms: 1800});
+    if (f.k === 'interest') announce({ico: '🏦', pid: f.pid, text: `${name} 的存款生了利息`, amount: f.v, tone: f.pid === ME ? 'up' : '', ms: 1800});
+    if (f.k === 'stockBuy'){ sfx('coin'); announce({ico: STOCKS.find(s => s.id === f.sid).ico, pid: f.pid, text: `${name} 买了 ${f.n} 股${STOCKS.find(s => s.id === f.sid).name}`, amount: f.v, tone, ms: 2200}); }
+    if (f.k === 'stockSell'){ sfx('coin'); announce({ico: STOCKS.find(s => s.id === f.sid).ico, pid: f.pid, text: `${name} 卖了 ${f.n} 股${STOCKS.find(s => s.id === f.sid).name}`, amount: f.v, tone: f.pid === ME ? 'up' : '', ms: 2200}); }
+    if (f.k === 'deposit') announce({ico: '🏦', pid: f.pid, text: `${name} 存了 ¥${f.v}`, ms: 1600});
+    if (f.k === 'withdraw') announce({ico: '🏦', pid: f.pid, text: `${name} 取了 ¥${f.v}`, ms: 1600});
+    if (f.k === 'borrow') announce({ico: '🏦', pid: f.pid, text: `${name} 借了 ¥${f.v}`, ms: 1800});
+    if (f.k === 'repay') announce({ico: '🏦', pid: f.pid, text: `${name} 还了 ¥${f.v}`, ms: 1800});
   }
   if (S.card && S.card.id !== shownCard){
     shownCard = S.card.id;
@@ -510,6 +524,8 @@ function renderHud(){
   renderActs(p, mine);
   if (mine && !p.auto && S.step === 'buy' && S.offer >= 0 && modalKind !== 'buy') openBuy(S.offer);
   if (mine && !p.auto && S.step === 'shop' && modalKind !== 'shop' && modalKind !== 'deck') openShop();
+  if (mine && !p.auto && S.step === 'bank' && modalKind !== 'bank' && modalKind !== 'deck') openBank();
+  $('btnStock').disabled = !me();
   if (!(mine && !p.auto && S.step === 'buy') && modalKind === 'buy') closeModal();
   renderSound();
 }
@@ -523,6 +539,7 @@ function renderMsg(p, mine){
   if (S.phase === 'play'){
     if (S.step === 'buy' && !mine) text = `${p.name} 走到${SQ[S.offer].n}，在想要不要买`;
     else if (S.step === 'shop' && !mine) text = `${p.name} 在道具店挑东西`;
+    else if (S.step === 'bank' && !mine) text = `${p.name} 在银行办业务`;
     else if (S.step === 'roll' && p.jail) text = mine ? `你在监狱里：交 ${JAIL_FINE} 元出来，或者掷出对子出狱` : `${p.name} 在监狱里`;
     else if (S.step === 'manage' && mine && S.own[p.pos] === S.turn && game_canBuild(p, p.pos)) text = `这是你的${SQ[p.pos].n}，顺手在这里加盖一栋？`;
     else text = S.log[0] || '';
@@ -565,6 +582,12 @@ function renderActs(p, mine){
     const i = p.pos;
     if (S.own[i] === S.turn && game_canBuild(p, i)) box.appendChild(smallBtn(`在${SQ[i].n}加盖一栋 ${money(houseCost(p, i))}`, {type: 'build', sq: i}, 'lemon'));
     box.appendChild(S.again && !p.jail ? bigBtn('再掷一次', '🎲', {type: 'roll'}, 'lemon') : bigBtn('结束回合', '✓', {type: 'end'}, 'mint'));
+  } else if (S.step === 'bank'){
+    const b = el('button', 'big lemon');
+    b.type = 'button';
+    b.append(el('span', 'ico', '🏦'), el('span', '', '去办业务'));
+    b.addEventListener('click', () => openBank());
+    box.appendChild(b);
   } else if (S.step === 'shop'){
     const b = el('button', 'big lemon');
     b.type = 'button';
@@ -752,6 +775,133 @@ function openShop(refresh){
   openModal('shop', card, false, refresh);
 }
 
+/* ---------- 股票和银行 ---------- */
+const sharesOf = p => p.shares || {};
+function stockValue(p){ return S && S.stocks ? STOCKS.reduce((w, s, k) => w + (sharesOf(p)[s.id] || 0) * S.stocks[k].p, 0) : 0; }
+// 走势小图
+function spark(hist, w = 84, h = 26){
+  const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.setAttribute('class', 'spark');
+  const lo = Math.min(...hist), hi = Math.max(...hist), span = Math.max(1, hi - lo);
+  const pts = hist.map((v, i) => `${(hist.length === 1 ? w / 2 : i / (hist.length - 1) * (w - 4) + 2).toFixed(1)},${(h - 3 - (v - lo) / span * (h - 6)).toFixed(1)}`);
+  const path = document.createElementNS(ns, 'polyline');
+  path.setAttribute('points', pts.join(' '));
+  path.setAttribute('fill', 'none');
+  path.setAttribute('stroke', hist[hist.length - 1] >= hist[0] ? '#3cb990' : '#e2507e');
+  path.setAttribute('stroke-width', '2');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(path);
+  const dot = document.createElementNS(ns, 'circle');
+  const last = pts[pts.length - 1].split(',');
+  dot.setAttribute('cx', last[0]); dot.setAttribute('cy', last[1]); dot.setAttribute('r', '2.6');
+  dot.setAttribute('fill', hist[hist.length - 1] >= hist[0] ? '#3cb990' : '#e2507e');
+  svg.appendChild(dot);
+  return svg;
+}
+let stockSel = {id: null, n: 10};
+function openStock(refresh){
+  if (!S || !S.players || !S.stocks){ if (!refresh) toast('开局以后才能炒股'); return; }
+  const my = me(), canTrade = my && cur() === my && !my.auto && (S.step === 'roll' || S.step === 'manage');
+  const onFloor = my && my.pos === STOCK, fee = onFloor ? 0 : FEE;
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.style.setProperty('--g', 'var(--mint)');
+  const tx = el('div', 'tx');
+  tx.append(el('h3', '', '证券所'), el('p', '', my ? `现金 ${money(my.cash)} · 持股市值 ${money(stockValue(my))}` : '旁观'));
+  const pic = new Image();
+  pic.className = 'pic';
+  pic.src = sc.snapshot(STOCK);
+  head.append(tx, pic);
+  const body = el('div', 'card-body');
+  if (onFloor && canTrade) body.appendChild(el('p', 'tip', '🕵️ 你站在证券所：今天免手续费，还打听到了下一圈的内幕'));
+  else body.appendChild(el('p', 'note', canTrade ? `买卖都收 ${FEE * 100}% 手续费；走到证券所那一回合免费` : my ? '轮到你的时候才能买卖，现在先看看行情' : ''));
+  const ul = el('ul', 'stocks');
+  STOCKS.forEach((st, k) => {
+    const x = S.stocks[k], have = my ? (sharesOf(my)[st.id] || 0) : 0;
+    const li = el('li', stockSel.id === st.id ? 'sel' : '');
+    const top = el('button', 'row-btn');
+    top.type = 'button';
+    const nm = el('span', 'nm');
+    nm.append(el('b', '', `${st.ico} ${st.name}`), el('small', '', `${st.div ? `每圈分红 ${Math.round(st.div * 100)}%` : '不分红'}${have ? ` · 持有 ${have} 股` : ''}`));
+    const pr = el('span', 'pr');
+    const chg = x.hist.length > 1 ? x.p - x.hist[x.hist.length - 2] : 0;
+    pr.append(el('b', '', '¥' + x.p), el('small', chg > 0 ? 'up' : chg < 0 ? 'down' : '', chg ? `${chg > 0 ? '▲' : '▼'}${Math.abs(Math.round(chg / (x.p - chg) * 100))}%` : '—'));
+    top.append(nm, spark(x.hist), pr);
+    top.addEventListener('click', () => { stockSel = {id: stockSel.id === st.id ? null : st.id, n: 10}; openStock(true); });
+    li.appendChild(top);
+    if (onFloor && canTrade) li.appendChild(el('p', 'hint', `内幕：下一圈${x.trend > 0 ? '看涨 📈' : x.trend < 0 ? '看跌 📉' : '大概平稳 ➖'}`));
+    if (stockSel.id === st.id && canTrade){
+      const panel = el('div', 'trade');
+      const stepper = el('div', 'stepper');
+      const qty = el('b', '', String(stockSel.n));
+      const mk = (label, d) => { const b = el('button', 'btn ghost small', label); b.type = 'button'; b.addEventListener('click', () => { stockSel.n = Math.max(1, Math.min(999, stockSel.n + d)); openStock(true); }); return b; };
+      stepper.append(mk('−10', -10), mk('−1', -1), qty, mk('+1', 1), mk('+10', 10));
+      const cost = Math.ceil(x.p * stockSel.n * (1 + fee)), gain = Math.floor(x.p * stockSel.n * (1 - fee));
+      const row = el('div', 'row');
+      const buy = el('button', 'btn mint small', `买入 ${stockSel.n} 股 ${money(cost)}`);
+      buy.type = 'button';
+      buy.disabled = my.cash < cost;
+      buy.addEventListener('click', () => { sfx('click'); send({type: 'stockBuy', id: st.id, n: stockSel.n}); });
+      const sell = el('button', 'btn small', `卖出 ${Math.min(have, stockSel.n)} 股 ${money(Math.floor(x.p * Math.min(have, stockSel.n) * (1 - fee)))}`);
+      sell.type = 'button';
+      sell.disabled = !have;
+      sell.addEventListener('click', () => { sfx('click'); send({type: 'stockSell', id: st.id, n: Math.min(have, stockSel.n)}); });
+      row.append(buy, sell);
+      const maxBuy = Math.floor(my.cash / (x.p * (1 + fee)));
+      const quick = el('div', 'row');
+      const allIn = el('button', 'btn ghost small', `最多能买 ${maxBuy} 股`);
+      allIn.type = 'button';
+      allIn.disabled = maxBuy < 1;
+      allIn.addEventListener('click', () => { stockSel.n = Math.max(1, Math.min(999, maxBuy)); openStock(true); });
+      quick.appendChild(allIn);
+      if (have){ const all = el('button', 'btn ghost small', `全卖 ${have} 股`); all.type = 'button'; all.addEventListener('click', () => { sfx('click'); send({type: 'stockSell', id: st.id, n: have}); }); quick.appendChild(all); }
+      panel.append(stepper, row, quick);
+      li.appendChild(panel);
+    }
+    ul.appendChild(li);
+  });
+  body.appendChild(ul);
+  const close = el('button', 'btn ghost small', '关闭');
+  close.type = 'button';
+  close.addEventListener('click', () => closeModal());
+  body.appendChild(close);
+  card.append(head, body);
+  openModal('stock', card, false, refresh);
+}
+function openBank(refresh){
+  const my = me();
+  if (!my || S.step !== 'bank') return;
+  const saving = my.saving || 0, loan = my.loan || 0;
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.style.setProperty('--g', 'var(--sky)');
+  const tx = el('div', 'tx');
+  tx.append(el('h3', '', '银行'), el('p', '', `现金 ${money(my.cash)} · 存款 ${money(saving)} · 贷款 ${money(loan)}`));
+  const pic = new Image();
+  pic.className = 'pic';
+  pic.src = sc.snapshot(28);
+  head.append(tx, pic);
+  const body = el('div', 'card-body');
+  body.appendChild(el('p', 'blurb', '存款每经过一次起点领 10% 利息；贷款每经过一次起点扣 10% 利息，最多借 ¥500。'));
+  const line = (label, opts) => {
+    const d = el('div', 'bank-row');
+    d.appendChild(el('span', 'lb', label));
+    for (const [text, a, dis] of opts){ const b = el('button', 'btn ghost small', text); b.type = 'button'; b.disabled = !!dis; b.addEventListener('click', () => { sfx('click'); send(a); }); d.appendChild(b); }
+    return d;
+  };
+  body.appendChild(line('存钱', [['¥100', {type: 'deposit', v: 100}, my.cash < 100], ['¥500', {type: 'deposit', v: 500}, my.cash < 500], ['全部', {type: 'deposit', v: my.cash}, my.cash < 1]]));
+  body.appendChild(line('取钱', [['¥100', {type: 'withdraw', v: 100}, saving < 100], ['全部', {type: 'withdraw', v: saving}, saving < 1]]));
+  body.appendChild(line('借钱', [['¥100', {type: 'borrow', v: 100}, loan + 100 > LOAN_MAX], ['¥300', {type: 'borrow', v: 300}, loan + 300 > LOAN_MAX], ['借满', {type: 'borrow', v: LOAN_MAX - loan}, loan >= LOAN_MAX]]));
+  body.appendChild(line('还钱', [['¥100', {type: 'repay', v: 100}, loan < 100 || my.cash < 100], ['全部', {type: 'repay', v: Math.min(loan, my.cash)}, loan < 1 || my.cash < 1]]));
+  const done = el('button', 'btn mint', '办完了');
+  done.type = 'button';
+  done.addEventListener('click', () => { sfx('click'); closeModal(); send({type: 'bankDone'}); });
+  body.appendChild(done);
+  card.append(head, body);
+  openModal('bank', card, false, refresh);
+}
+
 /* ---------- 卡片弹窗 ---------- */
 let modalKind = '', cityOpen = -1, deckTimer = 0;
 function openModal(kind, card, clear, still){
@@ -884,6 +1034,11 @@ function openMine(refresh){
   const body = el('div', 'card-body');
   const list = el('ul', 'mine');
   const mineSq = SQ.map((s, i) => i).filter(i => S.own[i] === k);
+  const sv = stockValue(my), prop = mineSq.reduce((w, i) => w + SQ[i].p + (S.lvl[i] || 0) * (SQ[i].hc || 0), 0);
+  const sum = el('div', 'sum');
+  for (const [l, v] of [['现金', my.cash], ['房产', prop], ['存款', my.saving || 0], ['股票', sv], ['贷款', -(my.loan || 0)]]) if (v || l === '现金'){ const c = el('div'); c.append(el('span', '', l), el('b', '', money(v))); sum.appendChild(c); }
+  const tot = el('div', 'tot'); tot.append(el('span', '', '身家'), el('b', '', money(my.cash + prop + (my.saving || 0) + sv - (my.loan || 0)))); sum.appendChild(tot);
+  body.appendChild(sum);
   if (!mineSq.length) body.appendChild(el('p', 'note', '还没有城市。走到没人买的城市就能买下。'));
   for (const i of mineSq){
     const s = SQ[i], li = el('li');
@@ -963,7 +1118,7 @@ function openMenu(){
   head.appendChild(el('div', 'tx')).appendChild(el('h3', '', '怎么玩'));
   const body = el('div', 'card-body');
   const ul = el('ul', 'rules');
-  for (const t of ['掷骰子往前走，走到没人买的城市可以买下。', '别人走到你的城市要交过路费；凑齐同色的城市，空地过路费翻倍。', '轮到你时，可以在任意一座自己的城市加盖一栋房子；凑齐同色随时能盖。盖满四栋可以升级大酒店。', '掷出对子可以再掷一次，连着三次对子要进监狱。', `经过起点领 ${PASS_GO} 元。钱不够付账会先卖房子，再卖城市，还不够就破产。`, '每个角色有自己的本事，开局时选。', '圈数走完时按身家排名；或者只剩一个人没破产，他就赢了。', '走到道具店可以买道具卡，每人最多揣 3 张；底下的道具栏点一下就能用。', '点任何一格可以看它的介绍和过路费。']) ul.appendChild(el('li', '', t));
+  for (const t of ['掷骰子往前走，走到没人买的城市可以买下。', '别人走到你的城市要交过路费；凑齐同色的城市，空地过路费翻倍。', '轮到你时，可以在任意一座自己的城市加盖一栋房子；凑齐同色随时能盖。盖满四栋可以升级大酒店。', '掷出对子可以再掷一次，连着三次对子要进监狱。', `经过起点领 ${PASS_GO} 元。钱不够付账会先卖房子，再卖城市，还不够就破产。`, '每个角色有自己的本事，开局时选。', '圈数走完时按身家排名；或者只剩一个人没破产，他就赢了。', '走到道具店可以买道具卡，每人最多揣 3 张；底下的道具栏点一下就能用。', '轮到你时随时可以点 📈 炒股（手续费 5%）；走到证券所那一回合免手续费，还能看到下一圈的内幕。每圈开始行情会变，有的股票发分红。', '走到银行可以存钱、借钱：存款每经过一次起点领 10% 利息，贷款每经过一次起点扣 10% 利息，最多借 500。结算时股票、存款算进身家，贷款要扣掉。', '点任何一格可以看它的介绍和过路费。']) ul.appendChild(el('li', '', t));
   body.appendChild(ul);
   const sw = el('div', 'switches');
   const mk = (label, get, set) => {
@@ -1021,6 +1176,7 @@ $('btnCopy').addEventListener('click', () => {
   try { navigator.clipboard.writeText(text).then(() => toast('链接复制好了，发给朋友吧'), fallback); } catch (e){ fallback(); }
 });
 $('btnMine').addEventListener('click', () => openMine());
+$('btnStock').addEventListener('click', () => { sfx('pop'); openStock(); });
 $('btnLog').addEventListener('click', () => {
   if (!S || !S.log) return;
   const card = el('div', 'card');

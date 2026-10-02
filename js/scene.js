@@ -8,12 +8,12 @@ import {UnrealBloomPass} from 'three/addons/postprocessing/UnrealBloomPass.js';
 import {ShaderPass} from 'three/addons/postprocessing/ShaderPass.js';
 import {OutputPass} from 'three/addons/postprocessing/OutputPass.js';
 import * as BGU from 'three/addons/utils/BufferGeometryUtils.js';
-import {SQ, GROUPS, N, CHARS} from './data.js?v=caed7d2d';
-import {mat, glowMat, setGlow, mesh, rbox, add, box, cyl, sph, cone, torus, capsule, lathe, bake, bakeLocal} from './mats.js?v=caed7d2d';
-import {makeLandmark} from './landmarks.js?v=caed7d2d';
-import {buildPark} from './park.js?v=caed7d2d';
-import {createFx} from './fx.js?v=caed7d2d';
-import {ToyShader} from './post.js?v=caed7d2d';
+import {SQ, GROUPS, N, CHARS} from './data.js?v=4dac8e9d';
+import {mat, glowMat, setGlow, mesh, rbox, add, box, cyl, sph, cone, torus, capsule, lathe, bake, bakeLocal} from './mats.js?v=4dac8e9d';
+import {makeLandmark} from './landmarks.js?v=4dac8e9d';
+import {buildPark} from './park.js?v=4dac8e9d';
+import {createFx} from './fx.js?v=4dac8e9d';
+import {ToyShader} from './post.js?v=4dac8e9d';
 
 const INK = '#3b2d45';
 const CREAM = '#fff6e8';

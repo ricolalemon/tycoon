@@ -1,6 +1,6 @@
 // 棋盘中间的小世界：草地、湖和小船、摩天轮、旋转木马、热气球、喷泉、小火车、树、花、路灯，还有天上的鸟和云
 import * as THREE from 'three';
-import {mat, glowMat, WATER, add, box, cyl, cone, sph, torus, capsule, tag, rbox} from './mats.js?v=caed7d2d';
+import {mat, glowMat, WATER, add, box, cyl, cone, sph, torus, capsule, tag, rbox} from './mats.js?v=4dac8e9d';
 
 const GRASS = '#9fdd86', GRASS2 = '#8ed47a', G_TOP = 0.19;
 const rnd = (() => { let a = 11; return () => { a = (a * 16807) % 2147483647; return a / 2147483647; }; })();

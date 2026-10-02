@@ -1,5 +1,5 @@
 // 规则：只在房主那边跑。不碰画面，所有变化都写进局面 S，再交给 commit 去存、去广播、去画
-import {SQ, N, JAIL, STATIONS, GROUP_SQ, START_CASH, PASS_GO, JAIL_FINE, STATION_RENT, CHARS, BOT_NAMES, CHANCE, FATE, TUNE, ITEMS, ITEM_IDS, HAND, SHOP} from './data.js?v=caed7d2d';
+import {SQ, N, JAIL, STATIONS, GROUP_SQ, START_CASH, PASS_GO, JAIL_FINE, STATION_RENT, CHARS, BOT_NAMES, CHANCE, FATE, TUNE, ITEMS, ITEM_IDS, HAND, SHOP, STOCKS, STOCK, LOAN_MAX, LOAN_RATE, SAVE_RATE, FEE} from './data.js?v=4dac8e9d';
 
 export const ROLL_MS = 1350, STEP_MS = 230, LAND_PAD = 380, TELEPORT_MS = 720;
 const rid = (n = 6) => Array.from({length: n}, () => 'abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random() * 31)]).join('');
@@ -7,6 +7,8 @@ const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--){ c
 const skill = p => p.ch;
 // 老存档没有这个字段
 const bag = p => (p.items || (p.items = []));
+const shares = p => (p.shares || (p.shares = {}));
+const R = (a, b) => a + Math.random() * (b - a);
 
 export class Game {
   // commit：局面变了要做的事；wait(ms, fn)：过一会儿再做（测试时可以换成立刻做）
@@ -70,7 +72,8 @@ export class Game {
     this.epoch++;
     Object.assign(S, {
       phase: 'play', gid: rid(),
-      players: S.seats.map(s => ({pid: s.pid, name: s.name, ai: s.ai, ch: s.ch, cash: START_CASH, pos: 0, jail: 0, cards: 0, out: false, auto: false, items: [], double: false, sleep: false})),
+      players: S.seats.map(s => ({pid: s.pid, name: s.name, ai: s.ai, ch: s.ch, cash: START_CASH, pos: 0, jail: 0, cards: 0, out: false, auto: false, items: [], double: false, sleep: false, shares: {}, saving: 0, loan: 0, basis: {}})),
+      stocks: STOCKS.map(s => { const p = Math.round(s.base * R(0.9, 1.1)); return {p, hist: [p], trend: 0, chg: 0}; }),
       own: Array(N).fill(-1), lvl: Array(N).fill(0),
       turn: 0, round: 1, step: 'roll', dice: [3, 4], one: false, rollId: 0, dbl: 0, again: false,
       decks: {chance: shuffled(CHANCE.map((_, i) => i)), fate: shuffled(FATE.map((_, i) => i))}, deckPos: {chance: 0, fate: 0},
@@ -119,6 +122,7 @@ export class Game {
     const k = this.idx(p);
     let w = p.cash;
     this.S.own.forEach((o, i) => { if (o === k) w += SQ[i].p + (this.S.lvl[i] || 0) * (SQ[i].hc || 0); });
+    w += (p.saving || 0) - (p.loan || 0) + this.stockValue(p);
     return w;
   }
   // 每回合可以在自己任意一座城市加盖一栋；凑齐同色的城市随时能盖，不限栋数
@@ -227,6 +231,87 @@ export class Game {
       case 'item':
         this.useItem(p, a);
         break;
+      case 'deposit': case 'withdraw': case 'borrow': case 'repay':
+        this.bankAct(p, a);
+        break;
+      case 'bankDone':
+        if (S.step !== 'bank') return;
+        this.after(p);
+        break;
+      case 'stockBuy': case 'stockSell':
+        this.trade(p, a);
+        break;
+    }
+  }
+  /* ---------- 银行 ---------- */
+  bankAct(p, a){
+    const S = this.S, v = Math.floor(+a.v || 0);
+    if (S.step !== 'bank' || v <= 0) return;
+    p.saving = p.saving || 0;
+    p.loan = p.loan || 0;
+    switch (a.type){
+      case 'deposit': if (v > p.cash) return; p.cash -= v; p.saving += v; this.fx({k: 'deposit', pid: p.pid, v}); this.log(`${p.name} 存了 ${v} 元`); break;
+      case 'withdraw': if (v > p.saving) return; p.saving -= v; p.cash += v; this.fx({k: 'withdraw', pid: p.pid, v}); this.log(`${p.name} 取了 ${v} 元`); break;
+      case 'borrow': if (p.loan + v > LOAN_MAX) return; p.loan += v; p.cash += v; this.fx({k: 'borrow', pid: p.pid, v}); this.log(`${p.name} 借了 ${v} 元`); break;
+      case 'repay': if (v > p.loan || v > p.cash) return; p.loan -= v; p.cash -= v; this.fx({k: 'repay', pid: p.pid, v}); this.log(`${p.name} 还了 ${v} 元`); break;
+    }
+    this.commit();
+  }
+  /* ---------- 股票 ---------- */
+  market(){
+    const S = this.S;
+    if (!S.stocks) S.stocks = STOCKS.map(s => { const p = Math.round(s.base * R(0.9, 1.1)); return {p, hist: [p], trend: 0, chg: 0}; });
+    return S.stocks;
+  }
+  stockValue(p){ const m = this.market(); return STOCKS.reduce((w, s, k) => w + (shares(p)[s.id] || 0) * m[k].p, 0); }
+  // 站在证券所的那一回合不收手续费
+  fee(p){ return p.pos === STOCK ? 0 : FEE; }
+  trade(p, a){
+    const S = this.S, k = STOCKS.findIndex(s => s.id === a.id), n = Math.floor(+a.n || 0);
+    if (k < 0 || n <= 0 || !(S.step === 'roll' || S.step === 'manage') || n > 999) return;
+    const m = this.market(), price = m[k].p, st = STOCKS[k];
+    if (a.type === 'stockBuy'){
+      const cost = Math.ceil(price * n * (1 + this.fee(p)));
+      if (p.cash < cost) return;
+      p.cash -= cost;
+      const had = shares(p)[st.id] || 0, basis = p.basis || (p.basis = {});
+      basis[st.id] = Math.round(((basis[st.id] || price) * had + price * n) / (had + n));
+      shares(p)[st.id] = had + n;
+      this.fx({k: 'stockBuy', pid: p.pid, sid: st.id, n, v: cost});
+      this.log(`${p.name} 买了 ${n} 股${st.name}，花了 ${cost}`);
+    } else {
+      if ((shares(p)[st.id] || 0) < n) return;
+      const gain = Math.floor(price * n * (1 - this.fee(p)));
+      shares(p)[st.id] -= n;
+      p.cash += gain;
+      this.fx({k: 'stockSell', pid: p.pid, sid: st.id, n, v: gain});
+      this.log(`${p.name} 卖了 ${n} 股${st.name}，得 ${gain}`);
+    }
+    this.commit();
+  }
+  // 每圈开始：行情变动、分红
+  updateMarket(){
+    const S = this.S, m = this.market(), moves = [];
+    STOCKS.forEach((st, k) => {
+      const x = m[k];
+      let change = x.trend * st.vol * 0.7 + R(-st.vol, st.vol);
+      if (x.p > st.base * 1.8) change -= 0.08;
+      if (x.p < st.base * 0.5) change += 0.08;
+      const np = Math.max(5, Math.round(x.p * (1 + change)));
+      x.chg = np - x.p;
+      x.p = np;
+      x.hist.push(np);
+      if (x.hist.length > 12) x.hist.shift();
+      const r = Math.random();
+      x.trend = r < 0.3 ? -1 : r < 0.6 ? 1 : 0;
+      moves.push({sid: st.id, chg: x.chg, pct: Math.round(x.chg / (np - x.chg) * 100)});
+    });
+    this.fx({k: 'market', moves});
+    for (const p of S.players){
+      if (p.out) continue;
+      let div = 0;
+      STOCKS.forEach((st, k) => { div += Math.floor((shares(p)[st.id] || 0) * m[k].p * st.div); });
+      if (div){ this.cash(p, div); this.fx({k: 'dividend', pid: p.pid, v: div}); this.log(`${p.name} 收到股票分红 ${div} 元`); }
     }
   }
   // 用道具：先检查能不能用，再生效
@@ -369,6 +454,8 @@ export class Game {
       this.cash(p, bonus);
       this.fx({k: 'go', pid: p.pid, v: bonus});
       this.log(`${p.name} 经过起点，领 ${bonus} 元`);
+      if (p.saving > 0){ const it = Math.floor(p.saving * SAVE_RATE); p.saving += it; this.fx({k: 'interest', pid: p.pid, v: it}); this.log(`${p.name} 的存款生了 ${it} 元利息`); }
+      if (p.loan > 0){ const it = Math.ceil(p.loan * LOAN_RATE); this.pay(p, null, it, '贷款利息'); }
     }
     // 远路（卡片送你去很远的地方）走快一点，整段不超过三秒左右
     const step = path.length > 12 ? Math.max(70, Math.round(STEP_MS * 12 / path.length)) : STEP_MS;
@@ -423,8 +510,12 @@ export class Game {
       S.step = 'shop';
       this.log(`${p.name} 走进了道具店`);
       return this.commit();
-    } else if (s.t === 'bank' || s.t === 'stock'){
-      this.log(`${s.n}下一版开张，今天先路过`);
+    } else if (s.t === 'bank'){
+      S.step = 'bank';
+      this.log(`${p.name} 走进了银行`);
+      return this.commit();
+    } else if (s.t === 'stock'){
+      this.log(`${p.name} 走到证券所，这一回合炒股免手续费`);
     }
     this.after(p);
   }
@@ -488,6 +579,12 @@ export class Game {
     const k = this.idx(from);
     const mine = S.own.map((o, i) => (o === k ? i : -1)).filter(i => i >= 0);
     let raised = 0;
+    // 先动存款，再卖股票
+    if (from.saving > 0){ raised += from.saving; from.saving = 0; }
+    if (from.cash + raised < 0){
+      const m = this.market();
+      STOCKS.forEach((st, j) => { const n = shares(from)[st.id] || 0; if (n && from.cash + raised < 0){ raised += n * m[j].p; shares(from)[st.id] = 0; } });
+    }
     for (const i of mine.slice().sort((a, b) => S.lvl[b] - S.lvl[a])){
       while (S.lvl[i] > 0 && from.cash + raised < 0){ S.lvl[i]--; raised += SQ[i].hc / 2; }
     }
@@ -498,12 +595,15 @@ export class Game {
       raised += SQ[i].p / 2;
     }
     this.cash(from, raised);
-    if (from.cash >= 0){ this.log(`${from.name} 钱不够，卖掉房产凑了出来`); return; }
+    if (from.cash >= 0){ this.log(`${from.name} 钱不够，动用存款、股票和房产凑了出来`); return; }
     if (to) this.cash(to, from.cash);
     from.cash = 0;
     from.out = true;
     from.outAt = ++S.outCount;
     S.own.forEach((o, i) => { if (o === k){ S.own[i] = -1; S.lvl[i] = 0; } });
+    from.shares = {};
+    from.saving = 0;
+    from.loan = 0;
     this.fx({k: 'bust', pid: from.pid});
     this.log(`${from.name} 破产出局了`);
     if (S.players.filter(q => !q.out).length <= 1) S.endNow = true;
@@ -532,6 +632,7 @@ export class Game {
     if (t <= S.turn){
       S.round++;
       if (S.maxRounds && S.round > S.maxRounds) return this.over();
+      this.updateMarket();
     }
     S.turn = t;
     S.step = 'roll';
@@ -581,12 +682,24 @@ export class Game {
   }
   botMove(p){
     const S = this.S;
-    if (S.phase !== 'play' || this.cur !== p || !['roll', 'buy', 'manage', 'shop'].includes(S.step)) return;
+    if (S.phase !== 'play' || this.cur !== p || !['roll', 'buy', 'manage', 'shop', 'bank'].includes(S.step)) return;
     if (S.step === 'shop'){
       // 挑一张最想要的，买得起就买一张
       const want = ['pass', 'double', 'dice', 'sleep', 'wreck', 'rocket', 'swap'].find(id => S.shop.includes(id) && p.cash - ITEMS[id].price >= 320 && bag(p).length < HAND);
       if (want) return this.play(p, {type: 'shopBuy', item: want});
       return this.play(p, {type: 'shopDone'});
+    }
+    if (S.step === 'bank'){
+      p.saving = p.saving || 0; p.loan = p.loan || 0;
+      if (p.loan > 0 && p.cash > p.loan + 400) return this.play(p, {type: 'repay', v: p.loan});
+      if (p.cash < 150 && p.loan < LOAN_MAX) return this.play(p, {type: 'borrow', v: Math.min(300, LOAN_MAX - p.loan)});
+      if (p.cash > 1300 && !p.saving) return this.play(p, {type: 'deposit', v: p.cash - 900});
+      if (p.cash < 200 && p.saving > 0) return this.play(p, {type: 'withdraw', v: p.saving});
+      return this.play(p, {type: 'bankDone'});
+    }
+    if (S.step === 'roll' && !p.jail){
+      const t = this.botTrade(p);
+      if (t) return this.play(p, t);
     }
     if (S.step === 'roll' && !p.jail && bag(p).length){
       const use = this.botItem(p);
@@ -605,6 +718,19 @@ export class Game {
       return this.play(p, {type: 'roll', one: skill(p) === 'rabbit' && !p.jail && this.rabbitPick(p)});
     }
     if (S.step === 'manage') return this.play(p, {type: S.again && !p.jail ? 'roll' : 'end'});
+  }
+  // 电脑炒股：便宜就买一点，涨够了就卖
+  botTrade(p){
+    const m = this.market();
+    for (let k = 0; k < STOCKS.length; k++){
+      const st = STOCKS[k], have = shares(p)[st.id] || 0, basis = (p.basis || {})[st.id] || st.base, price = m[k].p;
+      if (have && (price >= basis * 1.3 || price <= basis * 0.6 || this.S.round >= (this.S.maxRounds || 99) - 1)) return {type: 'stockSell', id: st.id, n: have};
+    }
+    if (p.cash > 900 && this.S.round < (this.S.maxRounds || 99) - 2){
+      const picks = STOCKS.map((st, k) => ({st, k, r: m[k].p / st.base})).filter(x => x.r < 0.95 && !(shares(p)[x.st.id] > 0)).sort((a, b) => a.r - b.r);
+      if (picks.length){ const {st, k} = picks[0]; const n = Math.min(30, Math.floor((p.cash - 700) / (m[k].p * 1.05))); if (n >= 3) return {type: 'stockBuy', id: st.id, n}; }
+    }
+    return null;
   }
   // 电脑什么时候用道具
   botItem(p){
@@ -642,12 +768,12 @@ export class Game {
   }
   scheduleBots(){
     const S = this.S;
-    if (!S || S.phase !== 'play' || !['roll', 'buy', 'manage', 'shop'].includes(S.step)) return;
+    if (!S || S.phase !== 'play' || !['roll', 'buy', 'manage', 'shop', 'bank'].includes(S.step)) return;
     const p = this.cur;
     if (!p || !(p.ai || p.auto)) return;
     const tok = ++this.botTok, ep = this.epoch;
     // 电脑掷骰子前想一下，落地以后停久一点，让人看清发生了什么
-    const delay = S.step === 'manage' ? 1800 : S.step === 'buy' || S.step === 'shop' ? 1400 : 1000;
+    const delay = S.step === 'manage' ? 1800 : S.step === 'buy' || S.step === 'shop' || S.step === 'bank' ? 1400 : 1000;
     this.wait(this.ms(p.ai ? delay : delay + 400), () => { if (tok === this.botTok && ep === this.epoch && this.cur === p) this.botMove(p); });
   }
 }
