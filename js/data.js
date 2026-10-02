@@ -28,7 +28,7 @@ export const SQ = [
   city(1, '南宁', 120, [8, 40, 100, 300, 450, 600], 50, 'longxiang', '龙象塔', '四季常绿的绿城，青秀山上的龙象塔看得见整座城。'),
   {t: 'jail', n: '监狱', lm: 'jail', blurb: '路过这里没事。被关进来要交 50 元、用出狱卡，或者掷出对子才能出去。'},
   city(2, '贵阳', 140, [10, 50, 150, 450, 625, 750], 100, 'jiaxiu', '甲秀楼', '凉爽的山城，甲秀楼踩着石桥站在南明河里。'),
-  {t: 'shop', n: '道具店', lm: 'stall', blurb: '下一版开张：在这里买道具卡。'},
+  {t: 'shop', n: '道具店', lm: 'stall', blurb: '走到这里可以买道具卡，货架上每次摆三张，每人最多揣 3 张。'},
   city(2, '昆明', 140, [10, 50, 150, 450, 625, 750], 100, 'jinma', '金马碧鸡坊', '春城四季如春，冬天海鸥飞来滇池做客。'),
   city(2, '海口', 160, [12, 60, 180, 500, 700, 900], 100, 'coconut', '椰林骑楼', '椰风海韵，骑楼老街里有一碗清补凉。'),
   {t: 'station', n: '机场', p: 200, lm: 'plane', blurb: '车站越多，过路费越贵：1 个 25，2 个 50，3 个 100，4 个 200。'},
@@ -76,6 +76,19 @@ export const CHARS = [
   {id: 'fox', name: '阿狸', emoji: '🦊', color: '#ff7a59', skill: '精明', desc: '交过路费少两成'},
   {id: 'pig', name: '福福', emoji: '🐷', color: '#62b6ff', skill: '福气', desc: '买城市打八折'}
 ];
+// 道具卡：道具店里买，每人最多揣 3 张。when：roll 掷骰子前用，any 自己回合里随时用，passive 自动生效
+export const ITEMS = {
+  dice: {name: '遥控骰子', ico: '🎲', price: 150, when: 'roll', desc: '这一次不掷骰子，自己定两颗骰子的点数（不算对子）。'},
+  rocket: {name: '火箭', ico: '🚀', price: 120, when: 'roll', desc: '不掷骰子，直接飞到自己任意一座城市或车站（不经过起点）。'},
+  pass: {name: '免费通行证', ico: '🛡️', price: 150, when: 'passive', desc: '下一次该交过路费的时候自动用掉，一分不用交。'},
+  wreck: {name: '拆迁队', ico: '💣', price: 200, when: 'any', desc: '拆掉对手一座城市的一栋房子（大酒店拆成四栋）。'},
+  swap: {name: '换位符', ico: '🔄', price: 120, when: 'any', desc: '和一个对手交换棋子的位置，换完照常掷骰子。'},
+  double: {name: '双倍通行费', ico: '💰', price: 180, when: 'any', desc: '到你下一回合之前，别人交给你的过路费翻倍。'},
+  sleep: {name: '瞌睡虫', ico: '😴', price: 160, when: 'any', desc: '让一个对手跳过他的下一回合。'}
+};
+export const ITEM_IDS = Object.keys(ITEMS);
+export const HAND = 3;
+export const SHOP = 12;
 export const BOT_NAMES = ['电脑·阿财', '电脑·小富', '电脑·大款', '电脑·旺旺', '电脑·多多'];
 
 export const CHANCE = [
@@ -98,7 +111,8 @@ export const CHANCE = [
   {text: '走错路了，后退两格', k: 'back', n: 2},
   {text: '拍了张爆款旅行照，领 80 元', k: 'money', v: 80},
   {text: '行李超重，交 60 元', k: 'money', v: -60},
-  {text: '帮老奶奶过马路，每位玩家给你 20 元', k: 'each', v: 20}
+  {text: '帮老奶奶过马路，每位玩家给你 20 元', k: 'each', v: 20},
+  {text: '去道具店逛逛', k: 'to', pos: 12}
 ];
 export const FATE = [
   {text: '银行算错了账，你多得 200 元', k: 'money', v: 200},

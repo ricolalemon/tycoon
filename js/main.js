@@ -1,9 +1,9 @@
 // 把规则、3D 画面、联机、声音和界面串起来
-import {createScene} from './scene.js?v=9c5962e2';
-import {Game, STEP_MS, ROLL_MS} from './engine.js?v=9c5962e2';
-import {createNet} from './net.js?v=9c5962e2';
-import {createAudio} from './audio.js?v=9c5962e2';
-import {SQ, GROUPS, CHARS, JAIL_FINE, STATION_RENT, PASS_GO, TUNE} from './data.js?v=9c5962e2';
+import {createScene} from './scene.js?v=caed7d2d';
+import {Game, STEP_MS, ROLL_MS} from './engine.js?v=caed7d2d';
+import {createNet} from './net.js?v=caed7d2d';
+import {createAudio} from './audio.js?v=caed7d2d';
+import {SQ, GROUPS, CHARS, JAIL_FINE, STATION_RENT, PASS_GO, TUNE, ITEMS, HAND, SHOP} from './data.js?v=caed7d2d';
 
 /* ---------- 基本工具 ---------- */
 const $ = id => document.getElementById(id);
@@ -268,6 +268,9 @@ function render(){
   lastPhase = S.phase;
   if (modalKind === 'city' && cityOpen >= 0) openCity(cityOpen, true);
   if (modalKind === 'mine') openMine(true);
+  if (modalKind === 'shop'){ const my = me(); if (my && S.step === 'shop' && cur() === my && !my.auto) openShop(true); else closeModal(); }
+  if (modalKind === 'item' || modalKind === 'pick'){ const my = me(); if (!my || cur() !== my || !['roll', 'manage'].includes(S.step)) closeModal(); }
+  renderHand();
 }
 function syncBoard(st){
   for (let i = 0; i < SQ.length; i++){
@@ -294,7 +297,9 @@ function playEffects(){
     const done = () => { animating--; if (S && S.players) sc.syncTokens(S.players); };
     if (a.jump){
       sfx('teleport');
-      sc.teleport(a.pid, a.path[a.path.length - 1]).then(() => { sfx('jail'); done(); }, done);
+      const landJail = a.path[a.path.length - 1] === 10 && !a.also;
+      sc.teleport(a.pid, a.path[a.path.length - 1]).then(() => { if (landJail) sfx('jail'); done(); }, done);
+      if (a.also) sc.teleport(a.also.pid, a.also.to);
     } else {
       const n = a.path.length;
       sc.hop(a.pid, a.path, FAST.on ? 5 : (a.ms || STEP_MS) - 15, k => { if (!FAST.on) sfx(k === n - 1 ? 'land' : 'hop', k); }).then(done, done);
@@ -331,6 +336,15 @@ function playEffects(){
     if (f.k === 'stay') announce({ico: '🔒', pid: f.pid, text: `${name} 没掷出对子，继续坐牢`, ms: 1800});
     if (f.k === 'card') announce({ico: f.deck === 'chance' ? '❓' : '🔮', pid: f.pid, text: `${name} 抽到${f.deck === 'chance' ? '机会' : '命运'}：${f.text}`, ms: 2800});
     if (f.k === 'bust'){ announce({ico: '💥', pid: f.pid, text: `${name} 破产出局了`, ms: 3000}); sfx('bust'); }
+    const victim = f.victim ? S.players.find(q => q.pid === f.victim) : null, vName = victim ? (victim.pid === ME ? '你' : victim.name) : '';
+    if (f.k === 'item'){ sfx('coin'); announce({ico: ITEMS[f.item].ico, pid: f.pid, text: `${name} 买了${ITEMS[f.item].name}`, amount: f.v, tone, ms: 2000}); }
+    if (f.k === 'use'){ sfx('zap'); announce({ico: ITEMS[f.item].ico, pid: f.pid, text: `${name} 用了${ITEMS[f.item].name}`, ms: 1800}); }
+    if (f.k === 'pass'){ sfx('zap'); announce({ico: '🛡️', pid: f.pid, text: `${name} 掏出免费通行证，${SQ[f.i].n}的过路费不用交`, ms: 2800}); }
+    if (f.k === 'wreck'){ sfx('wreck'); announce({ico: '💣', pid: f.pid, text: `${name} 拆了${vName}在${SQ[f.i].n}的一栋房子`, ms: 2800}); sc.burst('dust', f.i); }
+    if (f.k === 'swap') announce({ico: '🔄', pid: f.pid, text: `${name} 和${vName}换了位置`, ms: 2400});
+    if (f.k === 'double') announce({ico: '💰', pid: f.pid, text: `${name} 的过路费这一圈翻倍`, ms: 2400});
+    if (f.k === 'sleep') announce({ico: '😴', pid: f.pid, text: `${name} 给${vName}放了瞌睡虫`, ms: 2400});
+    if (f.k === 'sleepy'){ sfx('snore'); announce({ico: '💤', pid: f.pid, text: `${name} 睡着了，这一回合跳过`, ms: 2400}); }
   }
   if (S.card && S.card.id !== shownCard){
     shownCard = S.card.id;
@@ -472,7 +486,7 @@ function renderHud(){
     const v = shown ? shown.v : q.cash;
     cashEl.textContent = money(v);
     cashShown.set(q.pid, {v, el: cashEl});
-    info.append(el('span', 'nm', q.pid === ME ? '你' : q.name), cashEl);
+    info.append(el('span', 'nm', (q.pid === ME ? '你' : q.name) + (itemsOf(q).length ? ' ' + itemsOf(q).map(id => ITEMS[id].ico).join('') : '')), cashEl);
     d.append(avatar(q.ch), info);
     const badge = q.out ? '破产' : q.jail ? '坐牢' : q.auto ? '代打' : q.ai ? '电脑' : '';
     if (badge) d.appendChild(el('span', 'badge', badge));
@@ -495,6 +509,7 @@ function renderHud(){
   renderMsg(p, mine);
   renderActs(p, mine);
   if (mine && !p.auto && S.step === 'buy' && S.offer >= 0 && modalKind !== 'buy') openBuy(S.offer);
+  if (mine && !p.auto && S.step === 'shop' && modalKind !== 'shop' && modalKind !== 'deck') openShop();
   if (!(mine && !p.auto && S.step === 'buy') && modalKind === 'buy') closeModal();
   renderSound();
 }
@@ -507,6 +522,7 @@ function renderMsg(p, mine){
   let text = '';
   if (S.phase === 'play'){
     if (S.step === 'buy' && !mine) text = `${p.name} 走到${SQ[S.offer].n}，在想要不要买`;
+    else if (S.step === 'shop' && !mine) text = `${p.name} 在道具店挑东西`;
     else if (S.step === 'roll' && p.jail) text = mine ? `你在监狱里：交 ${JAIL_FINE} 元出来，或者掷出对子出狱` : `${p.name} 在监狱里`;
     else if (S.step === 'manage' && mine && S.own[p.pos] === S.turn && game_canBuild(p, p.pos)) text = `这是你的${SQ[p.pos].n}，顺手在这里加盖一栋？`;
     else text = S.log[0] || '';
@@ -549,6 +565,12 @@ function renderActs(p, mine){
     const i = p.pos;
     if (S.own[i] === S.turn && game_canBuild(p, i)) box.appendChild(smallBtn(`在${SQ[i].n}加盖一栋 ${money(houseCost(p, i))}`, {type: 'build', sq: i}, 'lemon'));
     box.appendChild(S.again && !p.jail ? bigBtn('再掷一次', '🎲', {type: 'roll'}, 'lemon') : bigBtn('结束回合', '✓', {type: 'end'}, 'mint'));
+  } else if (S.step === 'shop'){
+    const b = el('button', 'big lemon');
+    b.type = 'button';
+    b.append(el('span', 'ico', '🛍️'), el('span', '', '逛道具店'));
+    b.addEventListener('click', () => openShop());
+    box.appendChild(b);
   } else if (S.step === 'buy'){
     const b = el('button', 'big lemon');
     b.type = 'button';
@@ -575,6 +597,159 @@ function baseRent(i){
   const o = S.own[i], s = SQ[i];
   if (s.t === 'station') return STATION_RENT[SQ.filter((x, k) => x.t === 'station' && S.own[k] === o).length];
   return S.lvl[i] ? s.r[S.lvl[i]] : ownsGroup(o, s.g) ? s.r[0] * 2 : s.r[0];
+}
+
+/* ---------- 道具 ---------- */
+const itemsOf = p => p.items || [];
+function canUse(p, id){
+  const it = ITEMS[id];
+  if (!S || S.phase !== 'play' || cur() !== p || p.auto || it.when === 'passive') return false;
+  if (it.when === 'roll') return S.step === 'roll' && !p.jail;
+  return S.step === 'roll' || S.step === 'manage';
+}
+// 底下的道具栏
+function renderHand(){
+  const box = $('hand'), my = me();
+  box.replaceChildren();
+  if (!my || !S || S.phase !== 'play' || !itemsOf(my).length){ box.hidden = true; return; }
+  box.hidden = false;
+  for (const id of itemsOf(my)){
+    const it = ITEMS[id], b = el('button', 'item' + (canUse(my, id) ? ' ok' : ''));
+    b.type = 'button';
+    b.append(el('span', 'ico', it.ico), el('span', 'nm', it.name));
+    b.addEventListener('click', () => { sfx('pop'); openItem(id); });
+    box.appendChild(b);
+  }
+}
+function openItem(id){
+  const my = me(), it = ITEMS[id];
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.style.setProperty('--g', '#f2b628');
+  const tx = el('div', 'tx');
+  tx.append(el('h3', '', it.name), el('p', '', it.when === 'passive' ? '自动生效' : it.when === 'roll' ? '掷骰子前用' : '自己回合里随时用'));
+  head.append(tx, el('div', 'big-ico', it.ico));
+  const body = el('div', 'card-body');
+  body.appendChild(el('p', 'blurb', it.desc));
+  const row = el('div', 'row');
+  if (it.when === 'passive') body.appendChild(el('p', 'note', '该交过路费的时候会自动用掉。'));
+  else {
+    const use = el('button', 'btn lemon', '使用');
+    use.type = 'button';
+    use.disabled = !canUse(my, id);
+    use.addEventListener('click', () => { sfx('click'); pickTarget(id); });
+    row.appendChild(use);
+    if (!canUse(my, id)) body.appendChild(el('p', 'note', cur() !== my ? '轮到你的时候才能用。' : it.when === 'roll' ? (my.jail ? '在监狱里不能用。' : '只能在掷骰子前用。') : '这一步走完再用。'));
+  }
+  const close = el('button', 'btn ghost', '关闭');
+  close.type = 'button';
+  close.addEventListener('click', () => closeModal());
+  row.appendChild(close);
+  body.appendChild(row);
+  card.append(head, body);
+  openModal('item', card);
+}
+// 选目标：骰子点数、飞到哪、拆谁、和谁换、给谁放
+function pickTarget(id){
+  const my = me(), k = S.players.indexOf(my);
+  if (id === 'double'){ closeModal(); send({type: 'item', item: 'double'}); return; }
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.style.setProperty('--g', '#f2b628');
+  const tx = el('div', 'tx');
+  tx.append(el('h3', '', ITEMS[id].name), el('p', '', {dice: '定两颗骰子的点数', rocket: '飞到哪座城', wreck: '拆谁的房子', swap: '和谁换位置', sleep: '给谁放瞌睡虫'}[id]));
+  head.append(tx, el('div', 'big-ico', ITEMS[id].ico));
+  const body = el('div', 'card-body');
+  const bySend = (label, a) => { const b = el('button', 'btn lemon small', label); b.type = 'button'; b.addEventListener('click', () => { sfx('click'); closeModal(); send(a); }); return b; };
+  if (id === 'dice'){
+    const d = [6, 6];
+    const sum = el('p', 'note', `一共走 ${d[0] + d[1]} 格，到${SQ[(my.pos + d[0] + d[1]) % SQ.length].n}`);
+    const rows = [0, 1].map(j => {
+      const r = el('div', 'pips');
+      for (let v = 1; v <= 6; v++){
+        const b = el('button', 'pip' + (d[j] === v ? ' on' : ''), String(v));
+        b.type = 'button';
+        b.addEventListener('click', () => { d[j] = v; [...r.children].forEach((c, i) => c.classList.toggle('on', i + 1 === v)); sum.textContent = `一共走 ${d[0] + d[1]} 格，到${SQ[(my.pos + d[0] + d[1]) % SQ.length].n}`; });
+        r.appendChild(b);
+      }
+      return r;
+    });
+    body.append(rows[0], rows[1], sum);
+    const go = el('button', 'btn lemon', '就这么走');
+    go.type = 'button';
+    go.addEventListener('click', () => { sfx('click'); closeModal(); send({type: 'item', item: 'dice', d: d.slice()}); });
+    body.appendChild(go);
+  } else if (id === 'rocket' || id === 'wreck'){
+    const list = SQ.map((s, i) => i).filter(i => id === 'rocket' ? S.own[i] === k && i !== my.pos : S.own[i] >= 0 && S.own[i] !== k && S.lvl[i] > 0);
+    if (!list.length) body.appendChild(el('p', 'note', id === 'rocket' ? '你还没有别的城市可以飞过去。' : '对手还没盖房子，没得拆。'));
+    const ul = el('ul', 'mine');
+    for (const i of list){
+      const s = SQ[i], li = el('li');
+      const dot = el('span', 'dot');
+      dot.style.setProperty('--g', s.t === 'prop' ? GROUPS[s.g].color : '#9aa6c8');
+      const pic = new Image();
+      pic.className = 'thumb';
+      pic.src = sc.snapshot(i);
+      const nm = el('span', '');
+      const owner = S.players[S.own[i]];
+      nm.append(el('div', 'nm', s.n), el('div', 'lv', `${id === 'wreck' ? owner.name + ' · ' : ''}${S.lvl[i] === 5 ? '大酒店' : S.lvl[i] ? S.lvl[i] + ' 栋房子' : s.t === 'station' ? '车站' : '空地'}`));
+      li.append(dot, pic, nm, bySend(id === 'rocket' ? '飞去' : '拆', id === 'rocket' ? {type: 'item', item: 'rocket', to: i} : {type: 'item', item: 'wreck', sq: i}));
+      ul.appendChild(li);
+    }
+    body.appendChild(ul);
+  } else {
+    const list = S.players.filter(q => q !== my && !q.out && !(id === 'sleep' && q.sleep));
+    if (!list.length) body.appendChild(el('p', 'note', '没有可以选的对手。'));
+    const ul = el('ul', 'rank');
+    for (const q of list){
+      const li = el('li');
+      li.append(el('span', 'no', ''), avatar(q.ch), el('span', 'nm', `${q.name} · 在${SQ[q.pos].n}`), bySend(id === 'swap' ? '换' : '放', {type: 'item', item: id, pid: q.pid}));
+      ul.appendChild(li);
+    }
+    body.appendChild(ul);
+  }
+  const close = el('button', 'btn ghost small', '取消');
+  close.type = 'button';
+  close.addEventListener('click', () => closeModal());
+  body.appendChild(close);
+  card.append(head, body);
+  openModal('pick', card);
+}
+// 道具店
+function openShop(refresh){
+  const my = me();
+  if (!my || S.step !== 'shop') return;
+  const card = el('div', 'card');
+  const head = el('div', 'card-head');
+  head.style.setProperty('--g', '#ff92c2');
+  const tx = el('div', 'tx');
+  tx.append(el('h3', '', '道具店'), el('p', '', `你有 ${money(my.cash)} · 手里 ${itemsOf(my).length}/${HAND} 张`));
+  const pic = new Image();
+  pic.className = 'pic';
+  pic.src = sc.snapshot(SHOP);
+  head.append(tx, pic);
+  const body = el('div', 'card-body');
+  if (!S.shop || !S.shop.length) body.appendChild(el('p', 'note', '货架空了，下次再来。'));
+  const ul = el('ul', 'shop');
+  for (const id of S.shop || []){
+    const it = ITEMS[id], li = el('li');
+    const nm = el('span', '');
+    nm.append(el('div', 'nm', it.name), el('div', 'lv', it.desc));
+    const b = el('button', 'btn lemon small', money(it.price));
+    b.type = 'button';
+    b.disabled = my.cash < it.price || itemsOf(my).length >= HAND;
+    b.addEventListener('click', () => { sfx('click'); send({type: 'shopBuy', item: id}); });
+    li.append(el('span', 'ico', it.ico), nm, b);
+    ul.appendChild(li);
+  }
+  if (S.shop && S.shop.length) body.appendChild(ul);
+  if (itemsOf(my).length >= HAND) body.appendChild(el('p', 'note', `手里已经有 ${HAND} 张了，用掉再买。`));
+  const done = el('button', 'btn mint', '逛完了');
+  done.type = 'button';
+  done.addEventListener('click', () => { sfx('click'); closeModal(); send({type: 'shopDone'}); });
+  body.appendChild(done);
+  card.append(head, body);
+  openModal('shop', card, false, refresh);
 }
 
 /* ---------- 卡片弹窗 ---------- */
@@ -788,7 +963,7 @@ function openMenu(){
   head.appendChild(el('div', 'tx')).appendChild(el('h3', '', '怎么玩'));
   const body = el('div', 'card-body');
   const ul = el('ul', 'rules');
-  for (const t of ['掷骰子往前走，走到没人买的城市可以买下。', '别人走到你的城市要交过路费；凑齐同色的城市，空地过路费翻倍。', '轮到你时，可以在任意一座自己的城市加盖一栋房子；凑齐同色随时能盖。盖满四栋可以升级大酒店。', '掷出对子可以再掷一次，连着三次对子要进监狱。', `经过起点领 ${PASS_GO} 元。钱不够付账会先卖房子，再卖城市，还不够就破产。`, '每个角色有自己的本事，开局时选。', '圈数走完时按身家排名；或者只剩一个人没破产，他就赢了。', '点任何一格可以看它的介绍和过路费。']) ul.appendChild(el('li', '', t));
+  for (const t of ['掷骰子往前走，走到没人买的城市可以买下。', '别人走到你的城市要交过路费；凑齐同色的城市，空地过路费翻倍。', '轮到你时，可以在任意一座自己的城市加盖一栋房子；凑齐同色随时能盖。盖满四栋可以升级大酒店。', '掷出对子可以再掷一次，连着三次对子要进监狱。', `经过起点领 ${PASS_GO} 元。钱不够付账会先卖房子，再卖城市，还不够就破产。`, '每个角色有自己的本事，开局时选。', '圈数走完时按身家排名；或者只剩一个人没破产，他就赢了。', '走到道具店可以买道具卡，每人最多揣 3 张；底下的道具栏点一下就能用。', '点任何一格可以看它的介绍和过路费。']) ul.appendChild(el('li', '', t));
   body.appendChild(ul);
   const sw = el('div', 'switches');
   const mk = (label, get, set) => {

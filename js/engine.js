@@ -1,10 +1,12 @@
 // 规则：只在房主那边跑。不碰画面，所有变化都写进局面 S，再交给 commit 去存、去广播、去画
-import {SQ, N, JAIL, STATIONS, GROUP_SQ, START_CASH, PASS_GO, JAIL_FINE, STATION_RENT, CHARS, BOT_NAMES, CHANCE, FATE, TUNE} from './data.js?v=9c5962e2';
+import {SQ, N, JAIL, STATIONS, GROUP_SQ, START_CASH, PASS_GO, JAIL_FINE, STATION_RENT, CHARS, BOT_NAMES, CHANCE, FATE, TUNE, ITEMS, ITEM_IDS, HAND, SHOP} from './data.js?v=caed7d2d';
 
 export const ROLL_MS = 1350, STEP_MS = 230, LAND_PAD = 380, TELEPORT_MS = 720;
 const rid = (n = 6) => Array.from({length: n}, () => 'abcdefghjkmnpqrstuvwxyz23456789'[Math.floor(Math.random() * 31)]).join('');
 const shuffled = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--){ const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 const skill = p => p.ch;
+// 老存档没有这个字段
+const bag = p => (p.items || (p.items = []));
 
 export class Game {
   // commit：局面变了要做的事；wait(ms, fn)：过一会儿再做（测试时可以换成立刻做）
@@ -68,11 +70,11 @@ export class Game {
     this.epoch++;
     Object.assign(S, {
       phase: 'play', gid: rid(),
-      players: S.seats.map(s => ({pid: s.pid, name: s.name, ai: s.ai, ch: s.ch, cash: START_CASH, pos: 0, jail: 0, cards: 0, out: false, auto: false})),
+      players: S.seats.map(s => ({pid: s.pid, name: s.name, ai: s.ai, ch: s.ch, cash: START_CASH, pos: 0, jail: 0, cards: 0, out: false, auto: false, items: [], double: false, sleep: false})),
       own: Array(N).fill(-1), lvl: Array(N).fill(0),
       turn: 0, round: 1, step: 'roll', dice: [3, 4], one: false, rollId: 0, dbl: 0, again: false,
       decks: {chance: shuffled(CHANCE.map((_, i) => i)), fate: shuffled(FATE.map((_, i) => i))}, deckPos: {chance: 0, fate: 0},
-      card: null, offer: -1, anim: null, animSeq: 0, landSq: -1, freeBuilt: false, rank: null, endNow: false, outCount: 0,
+      card: null, offer: -1, shop: null, rigged: false, anim: null, animSeq: 0, landSq: -1, freeBuilt: false, rank: null, endNow: false, outCount: 0,
       fx: [], fxSeq: 0, log: []
     });
     this.log(`出发！每人 ${START_CASH} 元，${S.maxRounds ? `玩 ${S.maxRounds} 圈` : '玩到只剩一个人'}`);
@@ -110,6 +112,7 @@ export class Game {
     let r = this.baseRent(i) * TUNE.rentMul;
     if (skill(owner) === 'tiger') r *= TUNE.tigerUp;
     if (skill(payer) === 'fox') r *= TUNE.foxOff;
+    if (owner.double) r *= 2;
     return Math.round(r);
   }
   worth(p){
@@ -204,11 +207,107 @@ export class Game {
       case 'end':
         if (S.step === 'manage' && !(S.again && !p.jail)) this.endTurn();
         break;
+      case 'shopBuy': {
+        if (S.step !== 'shop' || !S.shop || !S.shop.includes(a.item)) return;
+        const it = ITEMS[a.item];
+        if (!it || p.cash < it.price || bag(p).length >= HAND) return;
+        this.cash(p, -it.price);
+        bag(p).push(a.item);
+        S.shop = S.shop.filter(x => x !== a.item);
+        this.fx({k: 'item', pid: p.pid, item: a.item, v: it.price});
+        this.log(`${p.name} 买了一张${it.name}`);
+        this.commit();
+        break;
+      }
+      case 'shopDone':
+        if (S.step !== 'shop') return;
+        S.shop = null;
+        this.after(p);
+        break;
+      case 'item':
+        this.useItem(p, a);
+        break;
     }
   }
-  roll(p, one){
+  // 用道具：先检查能不能用，再生效
+  useItem(p, a){
+    const S = this.S, it = ITEMS[a.item], k = bag(p).indexOf(a.item);
+    if (!it || k < 0 || it.when === 'passive') return;
+    if (it.when === 'roll' && (S.step !== 'roll' || p.jail)) return;
+    if (it.when === 'any' && S.step !== 'roll' && S.step !== 'manage') return;
+    const take = () => { bag(p).splice(k, 1); this.fx({k: 'use', pid: p.pid, item: a.item}); };
+    switch (a.item){
+      case 'dice': {
+        const d1 = +a.d?.[0] | 0, d2 = +a.d?.[1] | 0;
+        if (d1 < 1 || d1 > 6 || d2 < 1 || d2 > 6) return;
+        take();
+        this.log(`${p.name} 用遥控骰子定了 ${d1}+${d2}`);
+        S.rigged = true;
+        this.roll(p, false, [d1, d2]);
+        break;
+      }
+      case 'rocket': {
+        const to = +a.to;
+        if (!(to >= 0 && to < N) || S.own[to] !== this.idx(p) || to === p.pos) return;
+        take();
+        this.log(`${p.name} 坐火箭飞到了${SQ[to].n}`);
+        S.card = null;
+        S.again = false;
+        S.landSq = -1;
+        S.anim = {id: ++S.animSeq, pid: p.pid, from: p.pos, path: [to], jump: true};
+        p.pos = to;
+        S.step = 'moving';
+        this.commit();
+        const ep = this.epoch;
+        this.wait(this.ms(TELEPORT_MS), () => { if (ep === this.epoch && S.step === 'moving') this.land(p); });
+        break;
+      }
+      case 'wreck': {
+        const sq = +a.sq, o = S.own[sq];
+        if (!(sq >= 0) || o < 0 || o === this.idx(p) || !S.lvl[sq]) return;
+        take();
+        S.lvl[sq] = S.lvl[sq] === 5 ? 4 : S.lvl[sq] - 1;
+        this.fx({k: 'wreck', pid: p.pid, i: sq, victim: S.players[o].pid});
+        this.log(`${p.name} 的拆迁队拆了${S.players[o].name}在${SQ[sq].n}的一栋房子`);
+        this.commit();
+        break;
+      }
+      case 'swap': {
+        const q = S.players.find(x => x.pid === a.pid);
+        if (!q || q === p || q.out) return;
+        take();
+        const a0 = p.pos, b0 = q.pos;
+        p.pos = b0;
+        q.pos = a0;
+        S.anim = {id: ++S.animSeq, pid: p.pid, from: a0, path: [b0], jump: true, also: {pid: q.pid, to: a0}};
+        this.fx({k: 'swap', pid: p.pid, victim: q.pid});
+        this.log(`${p.name} 和${q.name}换了位置`);
+        this.commit();
+        break;
+      }
+      case 'double':
+        if (p.double) return;
+        take();
+        p.double = true;
+        this.fx({k: 'double', pid: p.pid});
+        this.log(`${p.name} 的过路费这一圈翻倍`);
+        this.commit();
+        break;
+      case 'sleep': {
+        const q = S.players.find(x => x.pid === a.pid);
+        if (!q || q === p || q.out || q.sleep) return;
+        take();
+        q.sleep = true;
+        this.fx({k: 'sleep', pid: p.pid, victim: q.pid});
+        this.log(`${p.name} 给${q.name}放了瞌睡虫`);
+        this.commit();
+        break;
+      }
+    }
+  }
+  roll(p, one, fixed){
     const S = this.S;
-    const d1 = 1 + Math.floor(Math.random() * 6), d2 = one ? 0 : 1 + Math.floor(Math.random() * 6);
+    const d1 = fixed ? fixed[0] : 1 + Math.floor(Math.random() * 6), d2 = fixed ? fixed[1] : one ? 0 : 1 + Math.floor(Math.random() * 6);
     S.dice = [d1, d2];
     S.one = one;
     S.rollId++;
@@ -221,7 +320,8 @@ export class Game {
     this.wait(this.ms(ROLL_MS), () => { if (ep === this.epoch) this.afterRoll(p, d1, d2); });
   }
   afterRoll(p, d1, d2){
-    const S = this.S, sum = d1 + d2, dbl = d2 > 0 && d1 === d2;
+    const S = this.S, sum = d1 + d2, dbl = !S.rigged && d2 > 0 && d1 === d2;
+    S.rigged = false;
     this.fx({k: 'roll', pid: p.pid, d: [d1, d2], dbl});
     if (p.jail){
       if (dbl){ p.jail = 0; this.fx({k: 'free', pid: p.pid, how: 'dbl'}); this.log(`${p.name} 掷出对子，出狱了`); return this.move(p, sum); }
@@ -296,7 +396,12 @@ export class Game {
         if (p.cash >= this.price(p, i)){ S.step = 'buy'; S.offer = i; return this.commit(); }
         this.log(`${p.name} 走到${s.n}，可是钱不够买`);
       } else if (o !== S.turn && !S.players[o].out){
-        this.pay(p, S.players[o], this.rentFor(p, i), `${s.n}的过路费`);
+        const pk = bag(p).indexOf('pass');
+        if (pk >= 0){
+          bag(p).splice(pk, 1);
+          this.fx({k: 'pass', pid: p.pid, i});
+          this.log(`${p.name} 掏出免费通行证，${s.n}的过路费不用交`);
+        } else this.pay(p, S.players[o], this.rentFor(p, i), `${s.n}的过路费`);
       } else if (o === S.turn && s.t === 'prop'){
         S.landSq = i;
       }
@@ -311,7 +416,14 @@ export class Game {
       this.commit();
       const ep = this.epoch;
       return this.wait(this.ms(TELEPORT_MS), () => { if (ep === this.epoch) this.after(p); });
-    } else if (s.t === 'shop' || s.t === 'bank' || s.t === 'stock'){
+    } else if (s.t === 'shop'){
+      // 货架上摆三张随机的道具
+      const pool = shuffled(ITEM_IDS).slice(0, 3);
+      S.shop = pool;
+      S.step = 'shop';
+      this.log(`${p.name} 走进了道具店`);
+      return this.commit();
+    } else if (s.t === 'bank' || s.t === 'stock'){
       this.log(`${s.n}下一版开张，今天先路过`);
     }
     this.after(p);
@@ -404,8 +516,19 @@ export class Game {
     S.dbl = 0;
     S.landSq = -1;
     if (S.endNow || S.players.filter(q => !q.out).length <= 1) return this.over();
-    let t = S.turn;
-    do t = (t + 1) % S.players.length; while (S.players[t].out);
+    let t = S.turn, guard = 0;
+    for (;;){
+      t = (t + 1) % S.players.length;
+      if (S.players[t].out) continue;
+      if (S.players[t].sleep && guard++ < S.players.length){
+        S.players[t].sleep = false;
+        this.fx({k: 'sleepy', pid: S.players[t].pid});
+        this.log(`${S.players[t].name} 睡着了，这一回合跳过`);
+        continue;
+      }
+      break;
+    }
+    S.players[t].double = false;
     if (t <= S.turn){
       S.round++;
       if (S.maxRounds && S.round > S.maxRounds) return this.over();
@@ -458,7 +581,17 @@ export class Game {
   }
   botMove(p){
     const S = this.S;
-    if (S.phase !== 'play' || this.cur !== p || !['roll', 'buy', 'manage'].includes(S.step)) return;
+    if (S.phase !== 'play' || this.cur !== p || !['roll', 'buy', 'manage', 'shop'].includes(S.step)) return;
+    if (S.step === 'shop'){
+      // 挑一张最想要的，买得起就买一张
+      const want = ['pass', 'double', 'dice', 'sleep', 'wreck', 'rocket', 'swap'].find(id => S.shop.includes(id) && p.cash - ITEMS[id].price >= 320 && bag(p).length < HAND);
+      if (want) return this.play(p, {type: 'shopBuy', item: want});
+      return this.play(p, {type: 'shopDone'});
+    }
+    if (S.step === 'roll' && !p.jail && bag(p).length){
+      const use = this.botItem(p);
+      if (use) return this.play(p, use);
+    }
     if (S.step === 'buy'){
       const s = SQ[S.offer], k = S.turn, cost = this.price(p, S.offer);
       const completes = s.t === 'prop' && GROUP_SQ[s.g].every(i => i === S.offer || S.own[i] === k);
@@ -473,14 +606,48 @@ export class Game {
     }
     if (S.step === 'manage') return this.play(p, {type: S.again && !p.jail ? 'roll' : 'end'});
   }
+  // 电脑什么时候用道具
+  botItem(p){
+    const S = this.S, k = this.idx(p), has = id => bag(p).includes(id);
+    const risk = d => { const i = (p.pos + d) % N, o = S.own[i]; return o >= 0 && o !== k && !S.players[o].out ? this.rentFor(p, i) : 0; };
+    const safe = d => { const i = (p.pos + d) % N, o = S.own[i]; return o === -1 && (SQ[i].t === 'prop' || SQ[i].t === 'station') && p.cash >= this.price(p, i) + 150; };
+    let exp = 0;
+    for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) exp += risk(a + b) / 36;
+    const others = S.players.filter(q => q !== p && !q.out);
+    if (has('double') && !p.double && S.own.some((o, i) => o === k && SQ[i].t === 'prop')) return {type: 'item', item: 'double'};
+    if (has('sleep') && others.length){ const rich = others.slice().sort((a, b) => this.worth(b) - this.worth(a))[0]; if (!rich.sleep) return {type: 'item', item: 'sleep', pid: rich.pid}; }
+    if (has('wreck')){
+      let best = -1;
+      S.own.forEach((o, i) => { if (o >= 0 && o !== k && !S.players[o].out && S.lvl[i] > (best < 0 ? 0 : S.lvl[best])) best = i; });
+      if (best >= 0) return {type: 'item', item: 'wreck', sq: best};
+    }
+    if (has('dice') && exp > 40){
+      // 挑一个最合算的点数：能买的空地最好，其次是安全的格子
+      let pick = null, score = -1e9;
+      for (let d1 = 1; d1 <= 6; d1++) for (let d2 = d1; d2 <= 6; d2++){
+        const d = d1 + d2, sc = (safe(d) ? 120 : 0) - risk(d) + d * 2;
+        if (sc > score){ score = sc; pick = [d1, d2]; }
+      }
+      if (pick && score > -exp + 30) return {type: 'item', item: 'dice', d: pick};
+    }
+    if (has('rocket') && exp > 70){
+      const mine = S.own.map((o, i) => (o === k && i !== p.pos ? i : -1)).filter(i => i >= 0);
+      if (mine.length) return {type: 'item', item: 'rocket', to: mine[Math.floor(Math.random() * mine.length)]};
+    }
+    if (has('swap') && exp > 60){
+      const calm = others.map(q => { let e = 0; for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++){ const i = (q.pos + a + b) % N, o = S.own[i]; e += (o >= 0 && o !== k && !S.players[o].out ? this.rentFor(p, i) : 0) / 36; } return {q, e}; }).sort((x, y) => x.e - y.e)[0];
+      if (calm && calm.e < exp - 40) return {type: 'item', item: 'swap', pid: calm.q.pid};
+    }
+    return null;
+  }
   scheduleBots(){
     const S = this.S;
-    if (!S || S.phase !== 'play' || !['roll', 'buy', 'manage'].includes(S.step)) return;
+    if (!S || S.phase !== 'play' || !['roll', 'buy', 'manage', 'shop'].includes(S.step)) return;
     const p = this.cur;
     if (!p || !(p.ai || p.auto)) return;
     const tok = ++this.botTok, ep = this.epoch;
     // 电脑掷骰子前想一下，落地以后停久一点，让人看清发生了什么
-    const delay = S.step === 'manage' ? 1800 : S.step === 'buy' ? 1400 : 1000;
+    const delay = S.step === 'manage' ? 1800 : S.step === 'buy' || S.step === 'shop' ? 1400 : 1000;
     this.wait(this.ms(p.ai ? delay : delay + 400), () => { if (tok === this.botTok && ep === this.epoch && this.cur === p) this.botMove(p); });
   }
 }

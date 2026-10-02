@@ -149,6 +149,22 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .big.lemon{color:var(--ink);background:radial-gradient(circle at 35% 30%,#fff1a8,var(--lemon) 60%,#f2b628);box-shadow:inset 0 -6px 0 rgba(0,0,0,.1),inset 0 3px 0 rgba(255,255,255,.5),0 10px 24px rgba(242,182,40,.45)}
 @keyframes breathe{0%,100%{box-shadow:inset 0 -6px 0 rgba(0,0,0,.14),inset 0 3px 0 rgba(255,255,255,.4),0 10px 24px rgba(226,80,126,.45)}50%{box-shadow:inset 0 -6px 0 rgba(0,0,0,.14),inset 0 3px 0 rgba(255,255,255,.4),0 10px 34px rgba(226,80,126,.7)}}
 .alt{display:flex;flex-direction:column;align-items:center;gap:8px}
+/* 道具栏和道具店 */
+.hand{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;pointer-events:auto}
+.item{display:flex;align-items:center;gap:6px;padding:6px 12px 6px 8px;border:0;border-radius:999px;background:rgba(255,255,255,.9);box-shadow:0 4px 12px rgba(120,60,110,.14);font-weight:700;font-size:13px;color:var(--ink-soft);transition:transform .12s}
+.item .ico{font-size:20px;line-height:1}
+.item.ok{color:var(--ink);background:#fff;box-shadow:0 0 0 2.5px var(--lemon),0 6px 16px rgba(242,182,40,.4);animation:breathe2 2s ease-in-out infinite}
+.item:active{transform:scale(.95)}
+@keyframes breathe2{0%,100%{box-shadow:0 0 0 2.5px var(--lemon),0 6px 16px rgba(242,182,40,.4)}50%{box-shadow:0 0 0 3.5px var(--lemon),0 6px 22px rgba(242,182,40,.65)}}
+.shop{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.shop li{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px;border-radius:14px;background:#fff;box-shadow:inset 0 0 0 2px var(--line)}
+.shop .ico{font-size:26px;text-align:center;line-height:1}
+.shop .nm{font-weight:700}
+.shop .lv{font-size:12px;color:var(--ink-soft);line-height:1.35}
+.pips{display:flex;gap:6px;justify-content:center}
+.pip{width:40px;height:40px;border:0;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 2px var(--line);font-family:var(--font-num);font-weight:800;font-size:18px;color:var(--ink)}
+.pip.on{background:var(--lemon);box-shadow:inset 0 -3px 0 rgba(0,0,0,.08)}
+.card-head .big-ico{font-size:44px;line-height:1;filter:drop-shadow(0 4px 6px rgba(0,0,0,.15))}
 .waiting{padding:10px 18px;border-radius:999px;background:rgba(255,255,255,.85);font-size:14px;color:var(--ink-soft);box-shadow:0 4px 12px rgba(120,60,110,.12)}
 .side-btns{position:fixed;top:calc(64px + env(safe-area-inset-top,0px));right:12px;z-index:6;display:flex;flex-direction:column;gap:8px}
 
@@ -280,6 +296,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
   </div>
   <div class="hud-bottom">
     <div class="msg" id="msg" hidden></div>
+    <div class="hand" id="hand" hidden></div>
     <div class="dock">
       <button class="chip-btn" id="btnMine" type="button" aria-label="我的城市">🏠<span>城市</span></button>
       <div class="alt" id="acts"></div>
@@ -293,6 +310,6 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
-<script type="module" src="js/main.js?v=9c5962e2"></script>
+<script type="module" src="js/main.js?v=caed7d2d"></script>
 
 </html>

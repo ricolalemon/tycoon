@@ -81,6 +81,9 @@ export function createAudio(store){
     boom(){ noise({dur: 0.3, lp: 400, g: 0.5, a: 0.002}); for (let k = 0; k < 7; k++) noise({t: 0.08 + Math.random() * 0.45, dur: 0.02, hp: 2500, g: 0.12}); },
     whistle(){ for (const f of [587, 740]) tone({f, dur: 0.55, g: 0.045, type: 'square', lp: 1400, a: 0.04, hold: 0.3}); },
     teleport(){ tone({f: 600, f2: 1800, dur: 0.25, g: 0.1}); tone({t: 0.3, f: 1800, f2: 500, dur: 0.3, g: 0.1}); },
+    zap(){ tone({f: 400, f2: 2400, dur: 0.18, g: 0.09, type: 'triangle'}); tone({t: 0.12, f: 1600, dur: 0.2, g: 0.08}); },
+    wreck(){ noise({dur: 0.35, lp: 1200, lp2: 200, g: 0.4, a: 0.003}); tone({f: 120, f2: 40, dur: 0.4, g: 0.25}); for (let k = 0; k < 4; k++) noise({t: 0.1 + k * 0.08, dur: 0.04, lp: 3000, g: 0.12}); },
+    snore(){ for (const t of [0, 0.45]) tone({t, f: 110, f2: 70, dur: 0.4, g: 0.1, type: 'sawtooth', lp: 500, a: 0.08}); },
     tada(){ SFX.win(); }
   };
 
